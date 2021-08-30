@@ -646,7 +646,7 @@ TRACE_EVENT(sched_ravg_window_change,
 #endif /* _TRACE_WALT_H */
 
 #undef TRACE_INCLUDE_PATH
-#define TRACE_INCLUDE_PATH .
+#define TRACE_INCLUDE_PATH ../../techpack/sched
 #define TRACE_INCLUDE_FILE trace
 
 #include <trace/define_trace.h>
