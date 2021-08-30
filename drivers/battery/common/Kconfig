@@ -163,7 +163,7 @@ config TABLET_MODEL_CONCEPT
 	  then it make Y.
 
 config DUAL_BATTERY
-    bool "DUAL BATTERY support"
+    tristate "DUAL BATTERY support"
     depends on I2C
     help
 	  Say Y here to enable
