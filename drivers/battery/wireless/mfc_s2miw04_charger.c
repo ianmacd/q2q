@@ -47,10 +47,18 @@
 #define SENDSZ 16
 
 #define WAIT_TIMEOUT	1300
-
-make_get_mparam(s2miw04_mfc, lpcharge, unsigned int);
+#if IS_ENABLED(CONFIG_SEC_MPARAM) || (IS_MODULE(CONFIG_SEC_PARAM) && defined(CONFIG_ARCH_EXYNOS))
+extern unsigned int lpcharge;
 #if defined(CONFIG_WIRELESS_IC_PARAM)
-make_get_mparam(s2miw04_mfc, wireless_ic, unsigned int);
+extern unsigned int wireless_ic;
+#endif
+#else
+static unsigned int __read_mostly lpcharge;
+module_param(lpcharge, uint, 0444);
+#if defined(CONFIG_WIRELESS_IC_PARAM)
+static unsigned int __read_mostly wireless_ic;
+module_param(wireless_ic, uint, 0444);
+#endif
 #endif
 
 static u8 ADT_buffer_rdata[MAX_BUF] = {0, };
@@ -68,6 +76,7 @@ extern int mfc_send_mst_cmd(int cmd, struct mfc_charger_data *charger, u8 irq_sr
 #endif
 
 static const u16 mfc_lsi_vout_val16[] = {
+	0x006F, /* MFC_VOUT_4_5V */
 	0x0088, /* MFC_VOUT_5V */
 	0x00A1, /* MFC_VOUT_5_5V */
 	0x00BA, /* MFC_VOUT_6V */
@@ -105,9 +114,11 @@ static char *mfc_vout_control_mode_str[] = {
 	"Set Vout 5.5V Step",
 	"Set Vout 9V Step",
 	"Set Vout 10V Step",
+	"Set Vout 4.5V Step",
 };
 
 static char *rx_vout_str[] = {
+	"Vout 4.5V",
 	"Vout 5V",
 	"Vout 5.5V",
 	"Vout 6V",
@@ -134,6 +145,11 @@ static enum power_supply_property mfc_charger_props[] = {
 static irqreturn_t mfc_wpc_det_irq_thread(int irq, void *irq_data);
 static irqreturn_t mfc_wpc_irq_thread(int irq, void *irq_data);
 static int mfc_reg_multi_write_verify(struct i2c_client *client, u16 reg, const u8 *val, int size);
+
+static unsigned int mfc_get_lpmode(void) { return lpcharge; }
+#if defined(CONFIG_WIRELESS_IC_PARAM)
+static unsigned int mfc_get_wrlic(void) { return wireless_ic; }
+#endif
 
 static void mfc_check_i2c_error(struct mfc_charger_data *charger, bool is_error)
 {
@@ -1065,44 +1081,33 @@ static void mfc_fan_control(struct mfc_charger_data *charger, bool on)
 
 static void mfc_set_vrect_adjust(struct mfc_charger_data *charger, int set)
 {
-	int i = 0;
+	if (charger->vout_mode == WIRELESS_VOUT_4_5V_STEP)
+		return;
 
 	switch (set) {
 	case MFC_HEADROOM_0:
-		for (i = 0; i < 6; i++) {
 			mfc_reg_write(charger->client, MFC_VRECT_ADJ_REG, 0x0);
-			msleep(50);
-		}
 		break;
 	case MFC_HEADROOM_1:
-		for (i = 0; i < 6; i++) {
 			mfc_reg_write(charger->client, MFC_VRECT_ADJ_REG, 0x36);
-			msleep(50);
-		}
 		break;
 	case MFC_HEADROOM_2:
-		for (i = 0; i < 6; i++) {
 			mfc_reg_write(charger->client, MFC_VRECT_ADJ_REG, 0x61);
-			msleep(50);
-		}
 		break;
 	case MFC_HEADROOM_3:
-		for (i = 0; i < 6; i++) {
 			mfc_reg_write(charger->client, MFC_VRECT_ADJ_REG, 0x7f);
-			msleep(50);
-		}
 		break;
 	case MFC_HEADROOM_4:
-		for (i = 0; i < 6; i++) {
 			mfc_reg_write(charger->client, MFC_VRECT_ADJ_REG, 0x06);
-			msleep(50);
-		}
 		break;
 	case MFC_HEADROOM_5:
-		for (i = 0; i < 6; i++) {
 			mfc_reg_write(charger->client, MFC_VRECT_ADJ_REG, 0x10);
-			msleep(50);
-		}
+		break;
+	case MFC_HEADROOM_6:
+			mfc_reg_write(charger->client, MFC_VRECT_ADJ_REG, 0x13);
+		break;
+	case MFC_HEADROOM_7:
+			mfc_reg_write(charger->client, MFC_VRECT_ADJ_REG, 0x8B);
 		break;
 	default:
 		pr_info("%s no headroom mode\n", __func__);
@@ -2468,6 +2473,16 @@ static void mfc_wpc_vout_mode_work(struct work_struct *work)
 			return;
 		}
 		break;
+	case WIRELESS_VOUT_4_5V_STEP:
+		vout_step--;
+		if (vout_step >= MFC_VOUT_4_5V) {
+			mfc_set_vout(charger, vout_step);
+			cancel_delayed_work(&charger->wpc_vout_mode_work);
+			queue_delayed_work(charger->wqueue,
+				&charger->wpc_vout_mode_work, msecs_to_jiffies(250));
+			return;
+		}
+		break;
 	case WIRELESS_VOUT_9V_STEP:
 		vout = MFC_VOUT_9V;
 	case WIRELESS_VOUT_10V_STEP:
@@ -2918,7 +2933,7 @@ static int mfc_s2miw04_chg_set_property(struct power_supply *psy,
 		case POWER_SUPPLY_EXT_PROP_WIRELESS_AUTH_ADT_STATUS: /* it has only PASS and FAIL */
 #if !defined(CONFIG_SEC_FACTORY)
 			if ((charger->pdata->cable_type != SEC_BATTERY_CABLE_NONE) &&
-				!get_mparam(s2miw04_mfc, lpcharge) &&
+				!mfc_get_lpmode() &&
 				(charger->adt_transfer_status != WIRELESS_AUTH_WAIT)) {
 				if (charger->adt_transfer_status != val->intval) {
 					charger->adt_transfer_status = val->intval;
@@ -2948,7 +2963,7 @@ static int mfc_s2miw04_chg_set_property(struct power_supply *psy,
 #endif
 			break;
 		case POWER_SUPPLY_EXT_PROP_WIRELESS_AUTH_ADT_DATA: /* data from auth service will be sent */
-			if (charger->pdata->cable_type != SEC_BATTERY_CABLE_NONE && !get_mparam(s2miw04_mfc, lpcharge)) {
+			if (charger->pdata->cable_type != SEC_BATTERY_CABLE_NONE && !mfc_get_lpmode()) {
 				u8 *p_data;
 				int i;
 
@@ -3033,6 +3048,17 @@ static int mfc_s2miw04_chg_set_property(struct power_supply *psy,
 		case POWER_SUPPLY_EXT_PROP_WIRELESS_2ND_DONE:
 			mfc_cma_cmb_onoff(charger, true, false);
 			pr_info("%s: 2nd wireless charging done! CMA only\n", __func__);
+
+			if (charger->pdata->wpc_vout_ctrl_full && is_wireless_type(charger->pdata->cable_type) &&
+				(charger->tx_id != TX_ID_DREAM_DOWN) &&
+				(charger->tx_id != TX_ID_DREAM_STAND)) {
+				mfc_set_vrect_adjust(charger, MFC_HEADROOM_7);
+				charger->vout_mode = WIRELESS_VOUT_4_5V_STEP;
+				cancel_delayed_work(&charger->wpc_vout_mode_work);
+				__pm_stay_awake(charger->wpc_vout_mode_ws);
+				queue_delayed_work(charger->wqueue, &charger->wpc_vout_mode_work, msecs_to_jiffies(250));
+				pr_info("%s: 2nd wireless charging done! vout set 4.5V & headroom offset -600mV!\n", __func__);
+			}
 			break;
 		case POWER_SUPPLY_EXT_PROP_WPC_EN:
 			mfc_set_wpc_en(charger, val->strval[0], val->strval[1]);
@@ -3197,7 +3223,6 @@ static int mfc_s2miw04_chg_set_property(struct power_supply *psy,
 			charger->led_cover = val->intval;
 			pr_info("%s: LED_COVER(%d)\n", __func__, charger->led_cover);
 			break;
-
 		default:
 			return -ENODATA;
 		}
@@ -3500,6 +3525,7 @@ static void mfc_wpc_pdrc_work(struct work_struct *work)
 #endif
 	} else if ((charger->pdata->cable_type == SEC_BATTERY_CABLE_WIRELESS_FAKE) && (wc_w_state == 1)) {
 		charger->pdata->cable_type = SEC_BATTERY_CABLE_NONE;
+		charger->is_full_status = 0;
 		value.intval = SEC_BATTERY_CABLE_NONE;
 		psy_do_property("wireless", set, POWER_SUPPLY_PROP_ONLINE, value);
 	}
@@ -3769,7 +3795,7 @@ static void mfc_wpc_isr_work(struct work_struct *work)
 				charger->max_power_by_txid = mfc_get_wireless20_max_power_by_txid(charger, val_data);
 #if !defined(CONFIG_SEC_FACTORY)
 				/* do not process during lpm and wired charging */
-				if (get_mparam(s2miw04_mfc, lpcharge)) {
+				if (mfc_get_lpmode()) {
 					value.intval = charger->pdata->cable_type;
 					pr_info("%s %s: It is AUTH PAD for WIRELESS 2.0 but LPM, %d\n",
 							WC_AUTH_MSG, __func__, charger->pdata->cable_type);
@@ -4382,7 +4408,7 @@ static void mfc_chg_parse_fod_data(struct device_node *np,
 #if defined(CONFIG_WIRELESS_IC_PARAM)
 static void mfc_parse_param_value(struct mfc_charger_data *charger)
 {
-	unsigned int param_value = get_mparam(s2miw04_mfc, wireless_ic);
+	unsigned int param_value = mfc_get_wrlic();
 
 	charger->wireless_param_info = param_value;
 	charger->wireless_chip_id_param = (param_value & 0xFF000000) >> 24;
@@ -4557,6 +4583,10 @@ static int mfc_chg_parse_dt(struct device *dev,
 	}
 	pdata->no_hv =
 	    of_property_read_bool(np, "battery,wireless_no_hv");
+
+	pdata->wpc_vout_ctrl_full = of_property_read_bool(np, "battery,wpc_vout_ctrl_full");
+	if (pdata->wpc_vout_ctrl_full)
+		pr_info("%s: vout after full w/a\n", __func__);
 
 	mfc_chg_parse_fod_data(np, pdata);
 
@@ -5079,7 +5109,8 @@ static void mfc_s2miw04_charger_shutdown(struct i2c_client *client)
 
 	if (gpio_get_value(charger->pdata->wpc_det)) {
 		pr_info("%s: forced 5V Vout\n", __func__);
-		mfc_set_vrect_adjust(charger, MFC_HEADROOM_1);
+		/* Prevent for unexpected FOD when reboot on morphie pad */
+		mfc_set_vrect_adjust(charger, MFC_HEADROOM_6);
 		mfc_set_vout(charger, MFC_VOUT_5V);
 
 		if (charger->is_afc_tx)

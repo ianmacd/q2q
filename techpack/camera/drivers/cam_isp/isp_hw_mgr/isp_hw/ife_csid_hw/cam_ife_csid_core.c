@@ -5194,11 +5194,14 @@ handle_fatal_error:
 				csid_hw->hw_intf->hw_idx);
 
 		if ((irq_status[CAM_IFE_CSID_IRQ_REG_IPP] &
-			CSID_PATH_OVERFLOW_RECOVERY))
+			CSID_PATH_OVERFLOW_RECOVERY)) {
 			CAM_INFO_RATE_LIMIT(CAM_ISP,
 				"CSID:%d IPP Overflow due to back pressure",
 				csid_hw->hw_intf->hw_idx);
-
+#if defined(CONFIG_SEC_ABC)
+			sec_abc_send_event("MODULE=camera@INFO=ipp_overflow");
+#endif
+		}
 		if (irq_status[CAM_IFE_CSID_IRQ_REG_IPP] &
 			CSID_PATH_ERROR_FIFO_OVERFLOW) {
 			CAM_ERR_RATE_LIMIT(CAM_ISP,

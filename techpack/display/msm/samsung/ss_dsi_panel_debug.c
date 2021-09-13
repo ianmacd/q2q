@@ -717,9 +717,9 @@ int ss_check_dsierr(struct samsung_display_driver_data *vdd, u8 *dsierr_cnt)
 		ret = -EIO;
 #if IS_ENABLED(CONFIG_SEC_ABC)
 		if (vdd->ndx == PRIMARY_DISPLAY_NDX)
-			sec_abc_send_event("MODULE=display@ERROR=panel_main_dsi_error");
+			sec_abc_send_event("MODULE=display@ERROR=act_section_panel_main_dsi_error");
 		else
-			sec_abc_send_event("MODULE=display@ERROR=panel_sub_dsi_error");
+			sec_abc_send_event("MODULE=display@ERROR=act_section_panel_sub_dsi_error");
 #endif
 	}
 

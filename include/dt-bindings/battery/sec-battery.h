@@ -206,6 +206,8 @@
  */
 #define SEC_BATTERY_RECHARGE_CONDITION_LIMITER          8
 
+#define SIOP_DEFAULT	0xFFFF
+
 /* enum sec_wireless_rx_power_list */
 #define SEC_WIRELESS_RX_POWER_5W		0
 #define SEC_WIRELESS_RX_POWER_7_5W		1

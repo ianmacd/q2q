@@ -52,8 +52,15 @@
 #include <linux/sti/abc_common.h>
 #endif
 
+#if IS_ENABLED(CONFIG_SEC_MPARAM) || (IS_MODULE(CONFIG_SEC_PARAM) && defined(CONFIG_ARCH_EXYNOS))
 #if defined(CONFIG_SEC_FACTORY)
 extern int factory_mode;
+#endif
+#else
+#if defined(CONFIG_SEC_FACTORY)
+static int __read_mostly factory_mode;
+module_param(factory_mode, int, 0444);
+#endif
 #endif
 
 #define I2C_ADDR_PMIC	(0xCC >> 1)	/* Top sys, Haptic */
@@ -103,6 +110,10 @@ static struct mfd_cell max77705_devs[] = {
 	{ .name = "max77705-flash", },
 #endif
 };
+
+#if defined(CONFIG_SEC_FACTORY)
+static int max77705_get_facmode(void) { return factory_mode; }
+#endif
 
 int max77705_read_reg(struct i2c_client *i2c, u8 reg, u8 *dest)
 {
@@ -991,7 +1002,7 @@ retry:
 						fw_header->major, fw_header->minor);
 				pr_info("Completed");
 #if defined(CONFIG_SEC_FACTORY)
-				if (factory_mode)
+				if (max77705_get_facmode())
 					max77705_write_fw_noautoibus(max77705);
 #endif
 				break;

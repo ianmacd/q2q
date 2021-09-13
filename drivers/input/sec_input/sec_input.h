@@ -45,6 +45,10 @@
 #include "sec_cmd.h"
 #include "sec_tclm_v2.h"
 
+#if !IS_ENABLED(CONFIG_QGKI) && IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
+#define DUAL_FOLDABLE_GKI
+#endif
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0))
 #define sec_input_proc_ops(ops_owner, ops_name, read_fn, write_fn)	\
 const struct proc_ops ops_name = {					\
@@ -672,6 +676,8 @@ struct sec_ts_plat_data {
 	int support_dual_foldable;
 	int support_sensor_hall;
 	int support_rawdata_map_num;
+	bool disable_vsync_scan;
+	bool chip_on_board;
 
 	struct completion resume_done;
 	struct wakeup_source *sec_ws;
@@ -693,14 +699,15 @@ int sec_tclm_execute_force_calibration(struct i2c_client *client, int cal_mode);
 extern int get_lcd_attached(char *mode);
 #endif
 
-#if IS_ENABLED(CONFIG_EXYNOS_DPU30)
+#if IS_ENABLED(CONFIG_EXYNOS_DPU30) || IS_ENABLED(CONFIG_MCD_PANEL)
 extern int get_lcd_info(char *arg);
 #endif
 
-#if IS_ENABLED(CONFIG_MTK_LCM)
+#if IS_ENABLED(CONFIG_SMCDSD_PANEL)
 extern unsigned int lcdtype;
 #endif
 
+int sec_input_get_lcd_id(struct device *dev);
 int sec_input_handler_start(struct device *dev);
 void sec_delay(unsigned int ms);
 int sec_input_set_temperature(struct device *dev, int state);

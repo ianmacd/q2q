@@ -23,7 +23,7 @@
 #include <linux/usb/typec/common/pdic_param.h>
 #include <linux/muic/common/muic_notifier.h>
 #include <linux/power_supply.h>
-#if IS_MODULE(CONFIG_BATTERY_SAMSUNG)
+#if IS_MODULE(CONFIG_BATTERY_SAMSUNG) || IS_MODULE(CONFIG_BATTERY_SAMSUNG_MODULE)
 #include <linux/battery/sec_battery_common.h>
 #elif defined(CONFIG_BATTERY_SAMSUNG)
 #include "../../../battery/common/sec_charging_common.h"
@@ -174,9 +174,10 @@ static void manager_event_notify(struct work_struct *data)
 	}
 
 #if defined(CONFIG_SEC_KUNIT)
-	manager_event_save(event_work);
-	if (flag_kunit_test)
+	if (flag_kunit_test) {
+		manager_event_save(event_work);
 		return;
+	}
 #endif
 
 #ifdef CONFIG_USB_NOTIFY_PROC_LOG
@@ -230,9 +231,10 @@ static void manager_muic_event_notify(struct work_struct *data)
 		pdic_event_id_string(event_work->event.id),
 		event_work->event.sub1, event_work->event.sub2, event_work->event.sub3);
 #if defined(CONFIG_SEC_KUNIT)
+	if (flag_kunit_test) {
 		manager_event_save(event_work);
-		if (flag_kunit_test)
-			return;
+		return;
+	}
 #endif
 
 #ifdef CONFIG_USB_NOTIFY_PROC_LOG

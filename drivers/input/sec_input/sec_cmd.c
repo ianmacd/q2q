@@ -812,9 +812,9 @@ void sec_cmd_exit(struct sec_cmd_data *data, int devt)
 	while (kfifo_len(&data->cmd_queue)) {
 		ret = kfifo_out(&data->cmd_queue, &cmd, sizeof(struct command));
 		if (!ret) {
-			pr_err("%s: %s %s: kfifo_out failed, it seems empty, ret=%d\n", dev_name(data->fac_dev), SECLOG, __func__, ret);
+			pr_err("%s %s: kfifo_out failed, it seems empty, ret=%d\n", SECLOG, __func__, ret);
 		}
-		pr_info("%s: %s %s: remove pending commands: %s", dev_name(data->fac_dev), SECLOG, __func__, cmd.cmd);
+		pr_info("%s %s: remove pending commands: %s", SECLOG, __func__, cmd.cmd);
 	}
 	mutex_unlock(&data->fifo_lock);
 	mutex_destroy(&data->fifo_lock);

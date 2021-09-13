@@ -15,10 +15,6 @@
 #include <linux/sti/abc_common.h>
 #endif
 
-make_get_mparam(sec_bat, lpcharge, unsigned int);
-make_get_mparam(sec_bat, fg_reset, int);
-make_get_mparam(sec_bat, factory_mode, int);
-
 static struct device_attribute sec_battery_attrs[] = {
 	SEC_BATTERY_ATTR(batt_reset_soc),
 	SEC_BATTERY_ATTR(batt_read_raw_soc),
@@ -589,9 +585,8 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 		break;
 
 	case BATT_LP_CHARGING:
-		if (get_mparam(sec_bat, lpcharge)) {
-			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", get_mparam(sec_bat, lpcharge));
-		}
+		if (sec_bat_get_lpmode())
+			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n", sec_bat_get_lpmode());
 		break;
 	case SIOP_ACTIVATED:
 		break;
@@ -838,7 +833,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 			else if (value.intval == 0)
 				jig_on = 1;
 
-			if (battery->is_jig_on || get_mparam(sec_bat, factory_mode) || battery->factory_mode || jig_on) {
+			if (battery->is_jig_on || sec_bat_get_facmode() || battery->factory_mode || jig_on) {
 				pr_info("%s: FGSRC_SWITCHING_VSYS\n", __func__);
 				value.intval = SEC_BAT_INBAT_FGSRC_SWITCHING_VSYS;
 				psy_do_property(battery->pdata->fgsrc_switch_name, set,
@@ -1947,7 +1942,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 #if defined(CONFIG_SEC_FACTORY)
 	case BATT_FACTORY_MODE:
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
-			get_mparam(sec_bat, factory_mode));
+			sec_bat_get_facmode());
 		break;
 #endif
 	case PD_DISABLE:
@@ -2561,8 +2556,8 @@ ssize_t sec_bat_store_attrs(
 	case BATT_CAPACITY_MAX:
 		if (sscanf(buf, "%10d\n", &x) == 1) {
 			dev_err(battery->dev,
-					"%s: BATT_CAPACITY_MAX(%d), fg_reset(%d)\n", __func__, x, get_mparam(sec_bat, fg_reset));
-			if (!get_mparam(sec_bat, fg_reset) && !battery->store_mode) {
+					"%s: BATT_CAPACITY_MAX(%d), fg_reset(%d)\n", __func__, x, sec_bat_get_fgreset());
+			if (!sec_bat_get_fgreset() && !battery->store_mode) {
 				value.intval = x;
 				psy_do_property(battery->pdata->fuelgauge_name, set,
 						POWER_SUPPLY_PROP_ENERGY_FULL_DESIGN, value);

@@ -2958,10 +2958,7 @@ static int zt75xx_ts_open(struct input_dev *dev)
 	if (info == NULL)
 		return 0;
 
-	if (!info->info_work_done) {
-		input_err(true, &info->client->dev, "%s: not finished info work\n", __func__);
-		return 0;
-	}
+	cancel_delayed_work_sync(&info->work_read_info);
 
 	desc = irq_to_desc(info->irq);
 
@@ -3017,10 +3014,7 @@ static void zt75xx_ts_close(struct input_dev *dev)
 	if (info == NULL)
 		return;
 
-	if (!info->info_work_done) {
-		input_err(true, &info->client->dev, "%s: not finished info work\n", __func__);
-		return;
-	}
+	cancel_delayed_work_sync(&info->work_read_info);
 
 #if IS_ENABLED(CONFIG_TRUSTONIC_TRUSTED_UI)
 	if (TRUSTEDUI_MODE_TUI_SESSION & trustedui_get_current_mode()) {

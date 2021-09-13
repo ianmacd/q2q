@@ -1000,6 +1000,9 @@ static int p61_probe(struct device *dev)
 		ese_set_spi_configuration("lpm");
 	else
 #endif
+	if (p61_dev->ap_vendor == AP_VENDOR_MTK)
+		ese_set_spi_configuration("lpm");
+	else
 		ese_set_spi_configuration("sleep");
 #else
 #if !defined(CONFIG_ESE_SECURE)

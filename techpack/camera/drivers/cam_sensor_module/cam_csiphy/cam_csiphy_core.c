@@ -705,12 +705,12 @@ static void cam_csiphy_cphy_overwrite_config(
 					0x16C, 0x36C, 0x56C };
 
 		int wide_tunning_data[] = { 0xA0, 0xA0, 0xA0,
-					0x09, 0x09, 0x09,
+					0x08, 0x08, 0x08,
 					0x17, 0x17, 0x17 };
-
+					
 		if (csiphy_device->soc_info.index == 0) { // Wide sensor
 			addrs = wide_tunning_addr;
-			datas = wide_tunning_data;
+                        datas = wide_tunning_data;
 			tunning_size = ARRAY_SIZE(wide_tunning_addr);
 			if (ARRAY_SIZE(wide_tunning_data) < tunning_size)
 				tunning_size = ARRAY_SIZE(wide_tunning_data);

@@ -15,7 +15,7 @@
 
 #define SM5451_TA_MIN_CURRENT   1000
 #define SM5451_CV_OFFSET        0
-#define SM5451_CI_OFFSET        200
+#define SM5451_CI_OFFSET        300
 
 enum SM5451_flag1_desc {
     SM5451_FLAG1_VBUSPD         = 1 << 5,
@@ -91,6 +91,7 @@ enum SM5451_reg_addr {
     SM5451_REG_THEM_ADC_H       = 0x65,
     SM5451_REG_THEM_ADC_L       = 0x66,
     SM5451_REG_IBATOCP_DG       = 0x92,
+    SM5451_REG_VDSQRB_DG		= 0x95,
 };
 
 enum SM5451_vbatovp_offset {
@@ -145,6 +146,8 @@ enum SM5451_op_mode {
 struct sm5451_platform_data {
     u8 rev_id;
     int irq_gpio;
+    u32 pps_lr;
+    u32 rpcm;
 
     struct {
         u32 chg_float_voltage;

@@ -1051,9 +1051,7 @@ static irqreturn_t tas256x_irq_thread(int irq, void *dev_id)
 	plat_data = (struct linux_platform *) p_tas256x->platform_data;
 
 	dev_info(plat_data->dev, "%s\n", __func__);
-#if IS_ENABLED(CONFIG_TAS256X_CODEC)
-	mutex_lock(&p_tas256x->codec_lock);
-#endif
+
 	/* Provide delay to handle over current shutdown */
 	msleep(100);
 
@@ -1061,6 +1059,9 @@ static irqreturn_t tas256x_irq_thread(int irq, void *dev_id)
 		pr_info("%s, Runtime Suspended\n", __func__);
 		goto end;
 	}
+#if IS_ENABLED(CONFIG_TAS256X_CODEC)
+	mutex_lock(&p_tas256x->codec_lock);
+#endif
 	/*Logical Layer IRQ function, return is ignored*/
 	tas256x_irq_work_func(p_tas256x);
 

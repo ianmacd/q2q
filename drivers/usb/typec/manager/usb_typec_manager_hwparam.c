@@ -201,12 +201,16 @@ unsigned long manager_hw_param_update(int param)
 		}
 		break;
 	case USB_CCIC_WATER_VBUS_TIME_DURATION:
+#if IS_ENABLED(CONFIG_BATTERY_SAMSUNG)
 		if (!is_lpcharge_pdic_param())
 			ret = get_wvbus_duration();
+#endif
 		break;
 	case USB_CCIC_WATER_LPM_VBUS_TIME_DURATION:
+#if IS_ENABLED(CONFIG_BATTERY_SAMSUNG)
 		if (is_lpcharge_pdic_param())
 			ret = get_wvbus_duration();
+#endif
 		break;
 	default:
 		break;

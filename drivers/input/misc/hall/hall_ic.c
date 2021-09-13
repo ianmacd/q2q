@@ -175,11 +175,23 @@ static ssize_t hall_number_show(struct device *dev,
 
 	return strlen(buf);
 }
+
+static ssize_t debounce_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct hall_ic_drvdata *ddata = dev_get_drvdata(dev);
+
+	sprintf(buf, "%d\n", ddata->pdata->debounce_interval);
+	
+	return strlen(buf);
+}
+
 static DEVICE_ATTR_RO(hall_detect);
 static DEVICE_ATTR_RO(certify_hall_detect);
 static DEVICE_ATTR_RO(hall_wacom_detect);
 static DEVICE_ATTR_RO(flip_status);
 static DEVICE_ATTR_RO(hall_number);
+static DEVICE_ATTR_RO(debounce);
 
 static struct device_attribute *hall_ic_attrs[] = {
 	&dev_attr_hall_detect,
@@ -340,8 +352,8 @@ static int hall_ic_setup_halls(struct hall_ic_drvdata *ddata)
 #endif
 	sec_hall_ic = ddata->sec_dev;
 
-	ret = sysfs_create_file(&ddata->sec_dev->kobj,
-						&dev_attr_hall_number.attr);
+	sysfs_create_file(&ddata->sec_dev->kobj, &dev_attr_hall_number.attr);
+	sysfs_create_file(&ddata->sec_dev->kobj, &dev_attr_debounce.attr);
 	list_for_each_entry(hall, &hall_ic_list, list) {
 		hall->state = gpio_get_value_cansleep(hall->gpio);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)

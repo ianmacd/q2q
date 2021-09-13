@@ -11,12 +11,10 @@
  */
 #include "sec_battery.h"
 
-#if defined(CONFIG_PREVENT_USB_CONN_OVERHEAT)
-make_get_mparam(sec_bat, lpcharge, unsigned int);
-#endif
-
-#if defined(CONFIG_PREVENT_USB_CONN_OVERHEAT)
+#if IS_ENABLED(CONFIG_MUIC_NOTIFIER)
 extern int muic_set_hiccup_mode(int on_off);
+#endif
+#if defined(CONFIG_MUIC_MAX77705)
 extern void pdic_manual_ccopen_request(int is_on);
 #endif
 
@@ -60,17 +58,17 @@ void sec_bat_check_mix_temp(struct sec_battery_info *battery)
 	int temperature = battery->temperature;
 	int chg_temp;
 	int input_current = 0;
-#if IS_ENABLED(CONFIG_DIRECT_CHARGING) || IS_ENABLED(CONFIG_TABLET_MODEL_CONCEPT)
+#if IS_ENABLED(CONFIG_DIRECT_CHARGING)
 	bool apdo_status = (is_pd_apdo_wire_type(battery->wire_status) && battery->pd_list.now_isApdo) ? 1 : 0;
 #endif
 
 	if (battery->pdata->temp_check_type == SEC_BATTERY_TEMP_CHECK_NONE ||
 			battery->pdata->chg_temp_check_type == SEC_BATTERY_TEMP_CHECK_NONE)
 		return;
-#if IS_ENABLED(CONFIG_TABLET_MODEL_CONCEPT)
+
 	if (battery->pdata->blkt_temp_check_type)
 		temperature = battery->blkt_temp;
-#endif
+
 
 #if IS_ENABLED(CONFIG_DIRECT_CHARGING)
 	if (apdo_status)
@@ -86,7 +84,7 @@ void sec_bat_check_mix_temp(struct sec_battery_info *battery)
 					(chg_temp >= battery->pdata->mix_high_chg_temp)) ||
 			(battery->mix_limit && (temperature > battery->pdata->mix_high_temp_recovery))) {
 			int max_input_current = battery->pdata->full_check_current_1st + 50;
-#if IS_ENABLED(CONFIG_TABLET_MODEL_CONCEPT)
+#if IS_ENABLED(CONFIG_DIRECT_CHARGING)
 			/* for checking charging source (DC -> SC) */
 			if (battery->pdata->blkt_temp_check_type && apdo_status && !battery->mix_limit) {
 				battery->mix_limit = true;
@@ -118,7 +116,7 @@ void sec_bat_check_mix_temp(struct sec_battery_info *battery)
 #endif
 		} else if (battery->mix_limit) {
 			battery->mix_limit = false;
-#if IS_ENABLED(CONFIG_TABLET_MODEL_CONCEPT)
+#if IS_ENABLED(CONFIG_DIRECT_CHARGING)
 			/* for checking charging source (SC -> DC) */
 			if (battery->pdata->blkt_temp_check_type)
 				sec_vote_refresh(battery->fcc_vote);
@@ -139,7 +137,7 @@ void sec_bat_check_mix_temp(struct sec_battery_info *battery)
 	} else {
 		if (battery->mix_limit) {
 			battery->mix_limit = false;
-#if IS_ENABLED(CONFIG_TABLET_MODEL_CONCEPT)
+#if IS_ENABLED(CONFIG_DIRECT_CHARGING)
 			/* for checking charging source (SC -> DC) */
 			if (battery->pdata->blkt_temp_check_type)
 				sec_vote_refresh(battery->fcc_vote);
@@ -748,26 +746,16 @@ void sec_bat_thermal_check(struct sec_battery_info *battery)
 			battery->cisd.data[CISD_DATA_UNSAFE_TEMPERATURE_PER_DAY]++;
 #endif
 
-#if defined(CONFIG_PREVENT_USB_CONN_OVERHEAT)
-			if (get_mparam(sec_bat, lpcharge)) {
-				if (is_hv_afc_wire_type(battery->cable_type) && !battery->vbus_limit) {
-#if defined(CONFIG_MUIC_HV) || defined(CONFIG_SUPPORT_HV_CTRL)
-					sec_vote(battery->iv_vote, VOTER_MUIC_ABNORMAL, true, SEC_INPUT_VOLTAGE_0V);
+			sec_vote(battery->iv_vote, VOTER_MUIC_ABNORMAL, true, SEC_INPUT_VOLTAGE_5V);
+			if (!sec_bat_get_lpmode()) {
+#if IS_ENABLED(CONFIG_MUIC_NOTIFIER)
+				muic_set_hiccup_mode(1);
 #endif
-					battery->vbus_limit = true;
-					pr_info("%s: Set AFC TA to 0V\n", __func__);
-				} else if (is_pd_wire_type(battery->cable_type)) {
-					sec_vote(battery->iv_vote, VOTER_MUIC_ABNORMAL, true, SEC_INPUT_VOLTAGE_5V);
-					pr_info("%s: Set PD TA to PDO 0\n", __func__);
-				}
-			} else if (is_pd_wire_type(battery->cable_type)) {
-				sec_vote(battery->iv_vote, VOTER_MUIC_ABNORMAL, true, SEC_INPUT_VOLTAGE_5V);
-				muic_set_hiccup_mode(1);
-				pdic_manual_ccopen_request(1);
-			} else {
-				muic_set_hiccup_mode(1);
+#if defined(CONFIG_MUIC_MAX77705)
+				if (is_pd_wire_type(battery->cable_type))
+					pdic_manual_ccopen_request(1);
+#endif
 			}
-#endif
 			break;
 		case BAT_THERMAL_OVERHEAT:
 			battery->usb_thm_status = USB_THM_NORMAL;
@@ -818,7 +806,7 @@ void sec_bat_thermal_check(struct sec_battery_info *battery)
 #endif
 			}
 			sec_vote(battery->fv_vote, VOTER_SWELLING, true, battery->pdata->high_temp_float);
-			sec_vote(battery->topoff_vote, VOTER_SWELLING, true, battery->pdata->high_temp_topoff);
+			sec_vote(battery->topoff_vote, VOTER_SWELLING, true, battery->pdata->full_check_current_2nd);
 
 			sec_bat_set_health(battery, POWER_SUPPLY_HEALTH_GOOD);
 			break;
@@ -860,7 +848,7 @@ void sec_bat_thermal_check(struct sec_battery_info *battery)
 				sec_vote(battery->fcc_vote, VOTER_SWELLING, true, battery->pdata->wire_cool3_current);
 			}
 			sec_vote(battery->fv_vote, VOTER_SWELLING, true, battery->pdata->low_temp_float);
-			sec_vote(battery->topoff_vote, VOTER_SWELLING, true, battery->pdata->low_temp_topoff);
+			sec_vote(battery->topoff_vote, VOTER_SWELLING, true, battery->pdata->full_check_current_2nd);
 			sec_vote(battery->chgen_vote, VOTER_SWELLING, true, SEC_BAT_CHG_MODE_CHARGING);
 			sec_bat_set_health(battery, POWER_SUPPLY_HEALTH_GOOD);
 			break;

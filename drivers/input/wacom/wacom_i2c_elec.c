@@ -249,18 +249,14 @@ void make_decision(struct wacom_i2c* wac_i2c, u16* arrResult)
 		edata->drxy[i] = edata->rxy[i] - edata->cal_xy;
 		edata->drxy_edg[i] = edata->rxy_edg[i] - edata->cal_xy_edg;
 
-		if (edata->xy[i] < edata->xy_ref[i] / 2 || edata->xx[i] < edata->xx_ref[i] / 2) {
+		if (edata->xy[i] < edata->xy_ref[i] / 2 || edata->xx[i] < edata->xx_ref[i] / 2)
 			arrResult[i + 1] |= SEC_OPEN;
-			open_count++;
-		}
 
 		if (edata->xy_xy[i] > edata->xy_spec[i] || edata->xx_xx[i] > edata->xx_spec[i])
 			arrResult[i + 1] |= SEC_SHORT;
 
-		if (edata->xx_self[i] > edata->xx_self_spec[i]) {
+		if (edata->xx_self[i] > edata->xx_self_spec[i])
 			arrResult[i + 1] |= SEC_OPEN;
-			open_count++;
-		}
 
 		if (edata->drxy[i] > edata->drxy_spec[i] || edata->drxy[i] < -edata->drxy_spec[i])
 			arrResult[i + 1] |= SEC_SHORT;
@@ -271,6 +267,9 @@ void make_decision(struct wacom_i2c* wac_i2c, u16* arrResult)
 		if (edata->drxy_edg[i] > edata->drxy_edg_spec[i] || edata->drxy_edg[i] < -edata->drxy_edg_spec[i])
 			arrResult[i + 1] |= SEC_SHORT;
 
+		if (arrResult[i + 1] & SEC_OPEN)
+			open_count++;
+
 		if (arrResult[i + 1] & SEC_SHORT)
 			short_count++;
 	}
@@ -280,18 +279,14 @@ void make_decision(struct wacom_i2c* wac_i2c, u16* arrResult)
 		edata->dryx[i] = edata->ryx[i] - edata->cal_yx;
 		edata->dryx_edg[i] = edata->ryx_edg[i] - edata->cal_yx_edg;
 
-		if (edata->yx[i] < edata->yx_ref[i] / 2 || edata->yy[i] < edata->yy_ref[i] / 2) {
+		if (edata->yx[i] < edata->yx_ref[i] / 2 || edata->yy[i] < edata->yy_ref[i] / 2)
 			arrResult[i + 1 + edata->max_x_ch] |= SEC_OPEN;
-			open_count++;
-		}
 
 		if (edata->yx_yx[i] > edata->yx_spec[i] || edata->yy_yy[i] > edata->yy_spec[i])
 			arrResult[i + 1 + edata->max_x_ch] |= SEC_SHORT;
 
-		if (edata->yy_self[i] > edata->yy_self_spec[i]) {
+		if (edata->yy_self[i] > edata->yy_self_spec[i])
 			arrResult[i + 1 + edata->max_x_ch] |= SEC_OPEN;
-			open_count++;
-		}
 
 		if (edata->dryx[i] > edata->dryx_spec[i] || edata->dryx[i] < -edata->dryx_spec[i])
 			arrResult[i + 1 + edata->max_x_ch] |= SEC_SHORT;
@@ -301,6 +296,9 @@ void make_decision(struct wacom_i2c* wac_i2c, u16* arrResult)
 
 		if (edata->dryx_edg[i] > edata->dryx_edg_spec[i] || edata->dryx_edg[i] < -edata->dryx_edg_spec[i])
 			arrResult[i + 1 + edata->max_x_ch] |= SEC_SHORT;
+
+		if (arrResult[i + 1 + edata->max_x_ch] & SEC_OPEN)
+			open_count++;
 
 		if (arrResult[i + 1 + edata->max_x_ch] & SEC_SHORT)
 			short_count++;

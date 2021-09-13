@@ -15,8 +15,95 @@
 #define __visible_for_testing static
 #endif
 
+static char *lcd_id;
+module_param(lcd_id, charp, S_IRUGO);
+
 struct device *ptsp;
 EXPORT_SYMBOL(ptsp);
+
+static int sec_input_lcd_parse_panel_id(void)
+{
+	char *pt;
+	int lcd_id_p = 0;
+
+	if (IS_ERR_OR_NULL(lcd_id))
+		return lcd_id_p;
+
+	for (pt = lcd_id; *pt != 0; pt++)  {
+		lcd_id_p <<= 4;
+		switch (*pt) {
+		case '0' ... '9':
+			lcd_id_p += *pt - '0';
+			break;
+		case 'a' ... 'f':
+			lcd_id_p += 10 + *pt - 'a';
+			break;
+		case 'A' ... 'F':
+			lcd_id_p += 10 + *pt - 'A';
+			break;
+		}
+	}
+	return lcd_id_p;
+}
+
+int sec_input_get_lcd_id(struct device *dev)
+{
+#if !IS_ENABLED(CONFIG_SMCDSD_PANEL)
+	int lcdtype = 0;
+#endif
+#if IS_ENABLED(CONFIG_EXYNOS_DPU30) || IS_ENABLED(CONFIG_MCD_PANEL)
+	int connected;
+#endif
+	int lcd_id_param = 0;
+
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	lcdtype = get_lcd_attached("GET");
+	if (lcdtype == 0xFFFFFF) {
+		input_err(true, dev, "%s: lcd is not attached\n", __func__);
+		return -ENODEV;
+	}
+#endif
+
+#if IS_ENABLED(CONFIG_EXYNOS_DPU30) || IS_ENABLED(CONFIG_MCD_PANEL)
+	connected = get_lcd_info("connected");
+	if (connected < 0) {
+		input_err(true, dev, "%s: Failed to get lcd info\n", __func__);
+		return -EINVAL;
+	}
+
+	if (!connected) {
+		input_err(true, dev, "%s: lcd is disconnected\n", __func__);
+		return -ENODEV;
+	}
+
+	input_info(true, dev, "%s: lcd is connected\n", __func__);
+
+	lcdtype = get_lcd_info("id");
+	if (lcdtype < 0) {
+		input_err(true, dev, "%s: Failed to get lcd info\n", __func__);
+		return -EINVAL;
+	}
+#endif
+#if IS_ENABLED(CONFIG_SMCDSD_PANEL)
+	if (!lcdtype) {
+		input_err(true, dev, "%s: lcd is disconnected\n", __func__);
+		return -ENODEV;
+	}
+#endif
+
+	lcd_id_param = sec_input_lcd_parse_panel_id();
+	if (lcdtype == 0 && lcd_id_param != 0) {
+		lcdtype = lcd_id_param;
+		if (lcdtype == 0xFFFFFF) {
+			input_err(true, dev, "%s: lcd is not attached\n", __func__);
+			return -ENODEV;
+		}
+	}
+
+	input_info(true, dev, "%s: lcdtype 0x%08X\n", __func__, lcdtype);
+	return lcdtype;
+}
+EXPORT_SYMBOL(sec_input_get_lcd_id);
 
 int sec_input_handler_start(struct device *dev)
 {
@@ -395,7 +482,9 @@ void sec_input_print_info(struct device *dev, struct sec_tclm_data *tdata)
 		pdata->print_info_cnt_release++;
 
 #if IS_ENABLED(CONFIG_INPUT_TOUCHSCREEN_TCLMV2)
-	if (tdata && tdata->tclm_string)
+	if (tdata && (tdata->tclm_level == TCLM_LEVEL_NOT_SUPPORT))
+		snprintf(tclm_buff, sizeof(tclm_buff), "");
+	else if (tdata && tdata->tclm_string)
 		snprintf(tclm_buff, sizeof(tclm_buff), "C%02XT%04X.%4s%s Cal_flag:%d fail_cnt:%d",
 			tdata->nvdata.cal_count, tdata->nvdata.tune_fix_ver,
 			tdata->tclm_string[tdata->nvdata.cal_position].f_name,
@@ -672,6 +761,9 @@ void sec_input_release_all_finger(struct device *dev)
 	struct sec_ts_plat_data *pdata = dev->platform_data;
 	int i;
 
+	if (!pdata->input_dev)
+		return;
+
 	if (pdata->prox_power_off) {
 		input_report_key(pdata->input_dev, KEY_INT_CANCEL, 1);
 		input_sync(pdata->input_dev);
@@ -917,13 +1009,26 @@ int sec_input_parse_dt(struct device *dev)
 	int ret = 0;
 	int count = 0, i;
 	u32 ic_match_value;
-#if !IS_ENABLED(CONFIG_SMCDSD_PANEL)
-	int lcdtype = 0;
-#endif
-#if IS_ENABLED(CONFIG_EXYNOS_DPU30)
-	int connected;
-#endif
 	u32 px_zone[3] = { 0 };
+	int lcd_type = 0, lcd_type_unload = 0;
+
+	lcd_type = sec_input_get_lcd_id(dev);
+#if !defined(DUAL_FOLDABLE_GKI)
+	if (lcd_type < 0) {
+		input_err(true, dev, "%s: lcd is not attached\n", __func__);
+#if !IS_ENABLED(CONFIG_TOUCHSCREEN_STM_SUB)
+		return -ENODEV;
+#endif
+	}
+#endif
+	input_info(true, dev, "%s: lcdtype 0x%08X\n", __func__, lcd_type);
+
+	if (!of_property_read_u32(np, "sec,lcd_type_unload", &lcd_type_unload)) {
+		if ((lcd_type != 0) && (lcd_type == lcd_type_unload)) {
+			input_err(true, dev, "%s: do not load lcdtype 0x%08X\n", __func__, lcd_type);
+			return -ENODEV;
+		}
+	}
 
 	pdata->tsp_icid = of_get_named_gpio(np, "sec,tsp-icid_gpio", 0);
 	if (gpio_is_valid(pdata->tsp_icid)) {
@@ -975,44 +1080,6 @@ int sec_input_parse_dt(struct device *dev)
 	if (of_property_read_u32(np, "sec,bringup", &pdata->bringup) < 0)
 		pdata->bringup = 0;
 
-#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
-	lcdtype = get_lcd_attached("GET");
-	if (lcdtype == 0xFFFFFF) {
-		input_err(true, dev, "%s: lcd is not attached\n", __func__);
-#if !IS_ENABLED(CONFIG_TOUCHSCREEN_STM_SUB)
-		return -ENODEV;
-#endif
-	}
-#endif
-#if IS_ENABLED(CONFIG_EXYNOS_DPU30)
-	connected = get_lcd_info("connected");
-	if (connected < 0) {
-		input_err(true, dev, "%s: Failed to get lcd info\n", __func__);
-		return -EINVAL;
-	}
-
-	if (!connected) {
-		input_err(true, dev, "%s: lcd is disconnected\n", __func__);
-		return -ENODEV;
-	}
-
-	input_info(true, dev, "%s: lcd is connected\n", __func__);
-
-	lcdtype = get_lcd_info("id");
-	if (lcdtype < 0) {
-		input_err(true, dev, "%s: Failed to get lcd info\n", __func__);
-		return -EINVAL;
-	}
-#endif
-#if IS_ENABLED(CONFIG_SMCDSD_PANEL)
-	if (!lcdtype) {
-		input_err(true, dev, "%s: lcd is disconnected\n", __func__);
-		return -ENODEV;
-	}
-#endif
-
-	input_info(true, dev, "%s: lcdtype 0x%08X\n", __func__, lcdtype);
-
 	pdata->tsp_id = of_get_named_gpio(np, "sec,tsp-id_gpio", 0);
 	if (gpio_is_valid(pdata->tsp_id)) {
 		pdata->tspid_val = gpio_get_value(pdata->tsp_id);
@@ -1036,16 +1103,21 @@ int sec_input_parse_dt(struct device *dev)
 			if ((lcd_id_num != count) || (lcd_id_num <= 0)) {
 				of_property_read_string_index(np, "sec,firmware_name", 0, &pdata->firmware_name);
 			} else {
-				u32 *lcd_id;
+				u32 *lcd_id_t;
+				u32 lcd_id_mask;
 
-				lcd_id = kcalloc(lcd_id_num, sizeof(u32), GFP_KERNEL);
-				if  (!lcd_id)
+				lcd_id_t = kcalloc(lcd_id_num, sizeof(u32), GFP_KERNEL);
+				if  (!lcd_id_t)
 					return -ENOMEM;
 
-				of_property_read_u32_array(np, "sec,select_lcdid", lcd_id, lcd_id_num);
+				of_property_read_u32_array(np, "sec,select_lcdid", lcd_id_t, lcd_id_num);
+				if (of_property_read_u32(np, "sec,lcdid_mask", &lcd_id_mask) < 0)
+					lcd_id_mask = 0xFFFFFF;
+				else
+					input_info(true, dev, "%s: lcd_id_mask: 0x%06X\n", __func__, lcd_id_mask);
 
 				for (i = 0; i < lcd_id_num; i++) {
-					if (lcd_id[i] == lcdtype) {
+					if ((lcd_id_t[i] & lcd_id_mask) == (lcd_type & lcd_id_mask)) {
 						of_property_read_string_index(np, "sec,firmware_name", i, &pdata->firmware_name);
 						break;
 					}
@@ -1059,8 +1131,8 @@ int sec_input_parse_dt(struct device *dev)
 					pdata->bringup = 1;
 
 				input_info(true, dev, "%s: count: %d, index:%d, lcd_id: 0x%X, firmware: %s\n",
-							__func__, count, i, lcd_id[i], pdata->firmware_name);
-				kfree(lcd_id);
+							__func__, count, i, lcd_id_t[i], pdata->firmware_name);
+				kfree(lcd_id_t);
 			}
 
 			if (pdata->bringup == 4)
@@ -1104,6 +1176,8 @@ int sec_input_parse_dt(struct device *dev)
 	pdata->support_mis_calibration_test = of_property_read_bool(np, "support_mis_calibration_test");
 	pdata->support_wireless_tx = of_property_read_bool(np, "support_wireless_tx");
 	pdata->support_input_monitor = of_property_read_bool(np, "support_input_monitor");
+	pdata->chip_on_board = of_property_read_bool(np, "chip_on_board");
+	pdata->disable_vsync_scan = of_property_read_bool(np, "disable_vsync_scan");
 	of_property_read_u32(np, "support_rawdata_map_num", &pdata->support_rawdata_map_num);
 
 	if (of_property_read_u32(np, "sec,support_dual_foldable", &pdata->support_dual_foldable) < 0)
@@ -1134,12 +1208,14 @@ int sec_input_parse_dt(struct device *dev)
 	pdata->support_mt_pressure = true;
 #endif
 	input_err(true, dev, "%s: i2c buffer limit: %d, lcd_id:%06X, bringup:%d,"
-			" id:%d,%d, dex:%d, max(%d/%d), FOD:%d, AOT:%d, ED:%d FLM:%d\n",
-			__func__, pdata->i2c_burstmax, lcdtype, pdata->bringup,
+			" id:%d,%d, dex:%d, max(%d/%d), FOD:%d, AOT:%d, ED:%d, FLM:%d,"
+			" COB:%d, disable_vsync_scan:%d\n",
+			__func__, pdata->i2c_burstmax, lcd_type, pdata->bringup,
 			pdata->tsp_id, pdata->tsp_icid,
 			pdata->support_dex, pdata->max_x, pdata->max_y,
 			pdata->support_fod, pdata->enable_settings_aot,
-			pdata->support_ear_detect, pdata->support_fod_lp_mode);
+			pdata->support_ear_detect, pdata->support_fod_lp_mode,
+			pdata->chip_on_board, pdata->disable_vsync_scan);
 	return ret;
 }
 EXPORT_SYMBOL(sec_input_parse_dt);

@@ -47,7 +47,7 @@
 #define DEGREE_90 90
 #define DEGREE_0 0
 #define FAC_CAL_DATA_NUM 9
-#define HALL_ANGLE_SPEC 15
+#define HALL_ANGLE_SPEC 25
 #define FLEX_LO 80
 #define FLEX_COVER_HI 70
 

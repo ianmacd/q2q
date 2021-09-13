@@ -130,16 +130,6 @@ enum misc_battery_health {
 					BATT_MISC_EVENT_WATER_HICCUP_TYPE |\
 					BATT_MISC_EVENT_TEMP_HICCUP_TYPE)
 
-#if defined(CONFIG_SEC_FACTORY)             // SEC_FACTORY
-#define STORE_MODE_CHARGING_MAX 80
-#define STORE_MODE_CHARGING_MIN 70
-#else                                       // !SEC_FACTORY, STORE MODE
-#define STORE_MODE_CHARGING_MAX 70
-#define STORE_MODE_CHARGING_MIN 60
-#define STORE_MODE_CHARGING_MAX_VZW 35
-#define STORE_MODE_CHARGING_MIN_VZW 30
-#endif //(CONFIG_SEC_FACTORY)
-
 #define ADC_CH_COUNT		10
 #define ADC_SAMPLE_COUNT	10
 
@@ -298,6 +288,30 @@ typedef struct sec_bat_adc_region {
 	int max;
 } sec_bat_adc_region_t;
 
+/* nv, hv, dc, wpc, wpc_hv */
+enum sec_siop_curr_type {
+	SIOP_CURR_TYPE_NV = 0,
+	SIOP_CURR_TYPE_HV,
+	SIOP_CURR_TYPE_FPDO,
+	SIOP_CURR_TYPE_APDO,
+	SIOP_CURR_TYPE_WPC_NV,
+	SIOP_CURR_TYPE_WPC_HV,
+	SIOP_CURR_TYPE_MAX,
+};
+
+struct sec_siop_table {
+	int level;
+	int icl[SIOP_CURR_TYPE_MAX];
+	int fcc[SIOP_CURR_TYPE_MAX];
+};
+
+#define SIOP_SCENARIO_NUM_MAX		10
+
+#if defined(CONFIG_TABLET_MODEL_CONCEPT) && !defined(CONFIG_SEC_FACTORY)
+#define SLOW_CHARGING_CURRENT_STANDARD          1000
+#else
+#define SLOW_CHARGING_CURRENT_STANDARD          400
+#endif
 
 struct sec_wireless_rx_power_info {
 	unsigned int vout;
@@ -381,6 +395,7 @@ typedef struct sec_battery_platform_data {
 	unsigned int **step_chg_curr;
 	unsigned int **step_chg_vfloat;
 #if IS_ENABLED(CONFIG_DIRECT_CHARGING)
+	unsigned int dc_step_chg_cond_v_margin;
 	unsigned int **dc_step_chg_cond_vol;
 	unsigned int **dc_step_chg_cond_soc;
 	unsigned int *dc_step_chg_cond_iin;
@@ -495,8 +510,6 @@ typedef struct sec_battery_platform_data {
 	int wireless_cool1_current;
 	int wireless_cool2_current;
 	int wireless_cool3_current;
-	int high_temp_topoff;
-	int low_temp_topoff;
 	int high_temp_float;
 	int low_temp_float;
 
@@ -570,6 +583,7 @@ typedef struct sec_battery_platform_data {
 	int chg_gpio_full_check;
 	/* 1 : active high, 0 : active low */
 	int chg_polarity_full_check;
+	bool chg_vbus_control_after_fullcharged;
 	sec_battery_full_condition_t full_condition_type;
 	unsigned int full_condition_soc;
 	unsigned int full_condition_vcell;
@@ -655,6 +669,10 @@ typedef struct sec_battery_platform_data {
 	int wc_hero_stand_cc_cv;
 	int wc_hero_stand_cv_current;
 	int wc_hero_stand_hv_cv_current;
+
+	int siop_scenarios_num;
+	int siop_curr_type_num;
+	struct sec_siop_table siop_table[SIOP_SCENARIO_NUM_MAX];
 
 	int default_input_current;
 	int default_charging_current;
@@ -893,7 +911,6 @@ struct sec_battery_info {
 	unsigned int chg_limit;
 	unsigned int chg_limit_recovery_cable;
 	unsigned int mix_limit;
-	unsigned int vbus_limit;
 
 	/* temperature check */
 	int temperature;	/* battery temperature */
@@ -1085,6 +1102,8 @@ struct sec_battery_info {
 	struct delayed_work wc20_current_work;
 #endif
 	struct delayed_work slowcharging_work;
+	int slow_charging;
+	struct delayed_work slow_chg_work;
 #if defined(CONFIG_BATTERY_AGE_FORECAST)
 	int batt_cycle;
 #endif
@@ -1186,6 +1205,15 @@ enum {
 	EXT_DEV_GAMEPAD_OTG,
 };
 
+extern unsigned int sec_bat_get_lpmode(void);
+extern void sec_bat_set_lpmode(unsigned int value);
+extern int sec_bat_get_fgreset(void);
+extern int sec_bat_get_facmode(void);
+extern unsigned int sec_bat_get_chgmode(void);
+extern void sec_bat_set_chgmode(unsigned int value);
+extern unsigned int sec_bat_get_dispd(void);
+extern void sec_bat_set_dispd(unsigned int value);
+
 extern int adc_read(struct sec_battery_info *battery, int channel);
 extern void adc_init(struct platform_device *pdev, struct sec_battery_info *battery);
 extern void adc_exit(struct sec_battery_info *battery);
@@ -1269,6 +1297,12 @@ extern bool sec_bat_check_dc_step_charging(struct sec_battery_info *battery);
 #endif
 #if defined(CONFIG_BATTERY_AGE_FORECAST)
 void sec_bat_set_aging_info_step_charging(struct sec_battery_info *battery);
+#endif
+#endif
+
+#if !defined(CONFIG_SEC_FACTORY)
+#if !defined(CONFIG_ARCH_EXYNOS)
+bool sales_code_is(char *str);
 #endif
 #endif
 

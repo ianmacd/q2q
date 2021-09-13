@@ -34,9 +34,18 @@
 #endif
 #define AICL_WORK_DELAY		100
 
-make_get_mparam(max77705_chg, lpcharge, unsigned int);
+#if IS_ENABLED(CONFIG_SEC_MPARAM) || (IS_MODULE(CONFIG_SEC_PARAM) && defined(CONFIG_ARCH_EXYNOS))
+extern unsigned int lpcharge;
 #if defined(CONFIG_SEC_FACTORY)
-make_get_mparam(max77705_chg, factory_mode, int);
+extern int factory_mode;
+#endif
+#else
+static unsigned int __read_mostly lpcharge;
+module_param(lpcharge, uint, 0444);
+#if defined(CONFIG_SEC_FACTORY)
+static int __read_mostly factory_mode;
+module_param(factory_mode, int, 0444);
+#endif
 #endif
 
 extern void max77705_usbc_icurr(u8 curr);
@@ -67,6 +76,11 @@ static void max77705_chg_set_mode_state(struct max77705_charger_data *charger,
 					unsigned int state);
 static void max77705_set_switching_frequency(struct max77705_charger_data *charger,
 					int frequency);
+
+static unsigned int max77705_get_lpmode(void) { return lpcharge; }
+#if defined(CONFIG_SEC_FACTORY)
+static unsigned int max77705_get_facmode(void) { return factory_mode; }
+#endif
 
 static bool max77705_charger_unlock(struct max77705_charger_data *charger)
 {
@@ -236,7 +250,7 @@ static void max77705_set_float_voltage(struct max77705_charger_data *charger,
 	u8 reg_data = 0;
 
 #if defined(CONFIG_SEC_FACTORY)
-	if (get_mparam(max77705_chg, factory_mode)) {
+	if (max77705_get_facmode()) {
 		float_voltage = charger->pdata->fac_vsys;
 		pr_info("%s: Factory Mode Skip set float voltage(%d)\n", __func__, float_voltage);
 		// do not return here
@@ -590,7 +604,7 @@ static void max77705_set_input_current(struct max77705_charger_data *charger,
 	int curr_step = 25;
 	u8 set_reg, set_mask, reg_data = 0;
 #if defined(CONFIG_SEC_FACTORY)
-	if (get_mparam(max77705_chg, factory_mode)) {
+	if (max77705_get_facmode()) {
 		pr_info("%s: Factory Mode Skip set input current\n", __func__);
 		return;
 	}
@@ -627,7 +641,7 @@ static void max77705_set_charge_current(struct max77705_charger_data *charger,
 	int curr_step = 50;
 	u8 reg_data = 0;
 #if defined(CONFIG_SEC_FACTORY)
-	if (get_mparam(max77705_chg, factory_mode)) {
+	if (max77705_get_facmode()) {
 		pr_info("%s: Factory Mode Skip set charge current\n", __func__);
 		return;
 	}
@@ -649,19 +663,27 @@ static void max77705_set_wireless_input_current(
 				struct max77705_charger_data *charger, int input_current)
 {
 	union power_supply_propval value;
+	unsigned int work_state;
 
 	__pm_stay_awake(charger->wc_current_ws);
+	cancel_delayed_work(&charger->wc_chg_current_work);
+	__pm_relax(charger->wc_chg_current_ws);
+
 	if (is_wireless_type(charger->cable_type)) {
-		/* Wcurr-A) In cases of wireless input current change,
-		 * configure the Vrect adj room to 270mV for safe wireless charging.
-		 */
-		if (is_hv_wireless_type(charger->cable_type))
-			value.intval = WIRELESS_VRECT_ADJ_ROOM_1; /* Vrect Room 277mV */
-		else
-			value.intval = charger->pdata->nv_wc_headroom;
-		psy_do_property(charger->pdata->wireless_charger_name, set,
-				POWER_SUPPLY_EXT_PROP_WIRELESS_RX_CONTROL, value);
-		msleep(500); /* delay 0.5sec */
+		work_state = work_busy(&charger->wc_current_work.work);
+		pr_info("%s: check wc_current_work state(0x%x)\n", __func__, work_state);
+		if (!(work_state & (WORK_BUSY_PENDING | WORK_BUSY_RUNNING))) {
+			/* Wcurr-A) In cases of wireless input current change,
+			 * configure the Vrect adj room to 270mV for safe wireless charging.
+			 */
+			if (is_hv_wireless_type(charger->cable_type))
+				value.intval = WIRELESS_VRECT_ADJ_ROOM_1; /* Vrect Room 277mV */
+			else
+				value.intval = charger->pdata->nv_wc_headroom;
+			psy_do_property(charger->pdata->wireless_charger_name, set,
+					POWER_SUPPLY_EXT_PROP_WIRELESS_RX_CONTROL, value);
+			msleep(500); /* delay 0.5sec */
+		}
 		charger->wc_pre_current = max77705_get_input_current(charger);
 		charger->wc_current = input_current;
 		pr_info("%s: wc_current(%d), wc_pre_current(%d)\n",
@@ -810,7 +832,7 @@ static int max77705_set_otg(struct max77705_charger_data *charger, int enable)
 	int ret = 0;
 
 	pr_info("%s: CHGIN-OTG %s\n", __func__,	enable > 0 ? "on" : "off");
-	if (charger->otg_on == enable || get_mparam(max77705_chg, lpcharge))
+	if (charger->otg_on == enable || max77705_get_lpmode())
 		return 0;
 
 	if (charger->pdata->wireless_charger_name) {
@@ -970,7 +992,7 @@ static void max77705_charger_initialize(struct max77705_charger_data *charger)
 	pr_info("%s jig_gpio = %d \n", __func__, jig_gpio);
 
 #if defined(CONFIG_SEC_FACTORY)
-	if (get_mparam(max77705_chg, factory_mode)) {
+	if (max77705_get_facmode()) {
 		/* fgsrc should depend on factory_mode since 301k and 619k do not triger jig_gpio */
 		max77705_update_reg(charger->i2c, MAX77705_CHG_REG_CNFG_07,
 				    (1 << CHG_CNFG_07_REG_FGSRC_SHIFT),
@@ -987,9 +1009,8 @@ static void max77705_charger_initialize(struct max77705_charger_data *charger)
 	}
 #else
 	max77705_update_reg(charger->i2c, MAX77705_CHG_REG_CNFG_07,
-				(jig_gpio << CHG_CNFG_07_REG_FGSRC_SHIFT),
-				CHG_CNFG_07_REG_FGSRC_MASK);
-
+		    (jig_gpio << CHG_CNFG_07_REG_FGSRC_SHIFT),
+		    CHG_CNFG_07_REG_FGSRC_MASK);
 	/* Watchdog Enable */
 	max77705_chg_set_wdtmr_en(charger, 1);
 #endif
@@ -1385,7 +1406,7 @@ static void max77705_chg_set_mode_state(struct max77705_charger_data *charger,
 		charger->is_charging = false;
 
 #if defined(CONFIG_SEC_FACTORY)
-	if (get_mparam(max77705_chg, factory_mode)) {
+	if (max77705_get_facmode()) {
 		if (state == SEC_BAT_CHG_MODE_CHARGING ||
 			state == SEC_BAT_CHG_MODE_CHARGING_OFF ||
 			state == SEC_BAT_CHG_MODE_BUCK_OFF) {
@@ -1740,6 +1761,9 @@ static int max77705_chg_set_property(struct power_supply *psy,
 #endif
 		case POWER_SUPPLY_EXT_PROP_CONSTANT_CHARGE_CURRENT_WRL:
 			charger->charging_current = val->intval;
+			__pm_stay_awake(charger->wc_chg_current_ws);
+			queue_delayed_work(charger->wqueue, &charger->wc_chg_current_work,
+				msecs_to_jiffies(3000));
 			break;
 		default:
 			return -EINVAL;
@@ -2121,43 +2145,6 @@ static void max77705_enable_aicl_irq(struct max77705_charger_data *charger)
 	pr_info("%s: enabled(%d)\n", __func__, charger->irq_aicl_enabled);
 }
 
-static void max77705_chgin_isr_work(struct work_struct *work)
-{
-	struct max77705_charger_data *charger =
-		container_of(work, struct max77705_charger_data, chgin_work.work);
-	union power_supply_propval value;
-	u8 chgin_dtls, chg_dtls, chg_cnfg_00;
-
-	psy_do_property("battery", get, POWER_SUPPLY_EXT_PROP_HEALTH, value);
-
-	max77705_read_reg(charger->i2c, MAX77705_CHG_REG_DETAILS_00, &chgin_dtls);
-	chgin_dtls =
-		((chgin_dtls & MAX77705_CHGIN_DTLS) >> MAX77705_CHGIN_DTLS_SHIFT);
-
-	max77705_read_reg(charger->i2c, MAX77705_CHG_REG_DETAILS_01, &chg_dtls);
-	chg_dtls = ((chg_dtls & MAX77705_CHG_DTLS) >> MAX77705_CHG_DTLS_SHIFT);
-
-	max77705_read_reg(charger->i2c, MAX77705_CHG_REG_CNFG_00, &chg_cnfg_00);
-
-	pr_info("%s: health(%d), chgin_dtls: 0x%x, chg_dtsl: 0x%x, chg_cnfg_00: 0x%x\n",
-			__func__, value.intval, chgin_dtls, chg_dtls, chg_cnfg_00);
-
-	enable_irq(charger->irq_aicl);
-	__pm_relax(charger->chgin_ws);
-}
-
-static irqreturn_t max77705_chgin_irq(int irq, void *data)
-{
-	struct max77705_charger_data *charger = data;
-
-	__pm_stay_awake(charger->chgin_ws);
-	disable_irq_nosync(charger->irq_aicl);
-	queue_delayed_work(charger->wqueue, &charger->chgin_work,
-			msecs_to_jiffies(100));
-
-	return IRQ_HANDLED;
-}
-
 static void max77705_wc_current_work(struct work_struct *work)
 {
 	struct max77705_charger_data *charger =
@@ -2201,6 +2188,22 @@ static void max77705_wc_current_work(struct work_struct *work)
 	}
 	pr_info("%s: wc_current(%d), wc_pre_current(%d), diff(%d)\n", __func__,
 		charger->wc_current, charger->wc_pre_current, diff_current);
+}
+
+static void max77705_wc_chg_current_work(struct work_struct *work)
+{
+	struct max77705_charger_data *charger =
+		container_of(work, struct max77705_charger_data, wc_chg_current_work.work);
+#if IS_ENABLED(CONFIG_DUAL_BATTERY)
+	union power_supply_propval value = {0, };
+#endif
+
+	max77705_set_charge_current(charger, charger->charging_current);
+#if IS_ENABLED(CONFIG_DUAL_BATTERY)
+	psy_do_property("battery", set,
+		POWER_SUPPLY_EXT_PROP_FASTCHG_LIMIT_CURRENT, value);
+#endif
+	__pm_relax(charger->wc_chg_current_ws);
 }
 
 static irqreturn_t max77705_sysovlo_irq(int irq, void *data)
@@ -2428,14 +2431,14 @@ static int max77705_charger_probe(struct platform_device *pdev)
 		pr_err("%s: Fail to Create Workqueue\n", __func__);
 		goto err_pdata_free;
 	}
-	charger->chgin_ws = wakeup_source_register(&pdev->dev, "charger->chgin");
 	charger->aicl_ws = wakeup_source_register(&pdev->dev, "charger-aicl");
 	charger->wc_current_ws = wakeup_source_register(&pdev->dev, "charger->wc-current");
 	charger->otg_ws = wakeup_source_register(&pdev->dev, "charger->otg");
+	charger->wc_chg_current_ws = wakeup_source_register(&pdev->dev, "charger->wc-chg-current");
 
-	INIT_DELAYED_WORK(&charger->chgin_work, max77705_chgin_isr_work);
 	INIT_DELAYED_WORK(&charger->aicl_work, max77705_aicl_isr_work);
 	INIT_DELAYED_WORK(&charger->wc_current_work, max77705_wc_current_work);
+	INIT_DELAYED_WORK(&charger->wc_chg_current_work, max77705_wc_chg_current_work);
 
 	charger_cfg.drv_data = charger;
 	charger->psy_chg = power_supply_register(&pdev->dev,
@@ -2473,14 +2476,6 @@ static int max77705_charger_probe(struct platform_device *pdev)
 	}
 
 	max77705_read_reg(charger->i2c, MAX77705_CHG_REG_INT_OK, &reg_data);
-
-	charger->irq_chgin = pdata->irq_base + MAX77705_CHG_IRQ_CHGIN_I;
-	ret = request_threaded_irq(charger->irq_chgin, NULL,
-			max77705_chgin_irq, 0,
-			"chgin-irq", charger);
-	if (ret < 0)
-		pr_err("%s: fail to request chgin IRQ: %d: %d\n",
-				__func__, charger->irq_chgin, ret);
 
 	charger->irq_bypass = pdata->irq_base + MAX77705_CHG_IRQ_BYP_I;
 	ret = request_threaded_irq(charger->irq_bypass, NULL,
@@ -2554,7 +2549,7 @@ err_power_supply_register:
 	wakeup_source_unregister(charger->otg_ws);
 	wakeup_source_unregister(charger->wc_current_ws);
 	wakeup_source_unregister(charger->aicl_ws);
-	wakeup_source_unregister(charger->chgin_ws);
+	wakeup_source_unregister(charger->wc_chg_current_ws);
 err_pdata_free:
 	kfree(charger_data);
 err_free:
@@ -2599,7 +2594,7 @@ static int max77705_charger_remove(struct platform_device *pdev)
 	wakeup_source_unregister(charger->otg_ws);
 	wakeup_source_unregister(charger->wc_current_ws);
 	wakeup_source_unregister(charger->aicl_ws);
-	wakeup_source_unregister(charger->chgin_ws);
+	wakeup_source_unregister(charger->wc_chg_current_ws);
 
 	kfree(charger);
 
@@ -2662,7 +2657,7 @@ static void max77705_charger_shutdown(struct platform_device *pdev)
 	pr_info("%s: ++\n", __func__);
 
 #if defined(CONFIG_SEC_FACTORY)
-	if (get_mparam(max77705_chg, factory_mode))
+	if (max77705_get_facmode())
 		goto free_chg;	/* prevent SMPL during SMD ARRAY shutdown */
 #endif
 	if (charger->i2c) {

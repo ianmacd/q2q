@@ -235,6 +235,8 @@ static int check_error_state(struct sm_dc_info *sm_dc, u8 retry_state)
 		pr_err("%s %s: error status retry, wait 2sec\n", sm_dc->name, __func__);
 		request_state_work(sm_dc, retry_state, DELAY_RETRY);
 		return -EAGAIN;
+	} else if (sm_dc->err == SM_DC_ERR_VBATREG || sm_dc->err == SM_DC_ERR_IBUSREG) {
+		return sm_dc->err;
 	} else if (sm_dc->err > SM_DC_ERR_NONE) {
 		pr_err("%s %s: error status:0x%x\n", sm_dc->name, __func__, sm_dc->err);
 		request_state_work(sm_dc, SM_DC_ERR, DELAY_NONE);
@@ -436,18 +438,9 @@ static inline int _try_to_adjust_cc_up(struct sm_dc_info *sm_dc)
 
 static inline void _try_to_adjust_cc_down(struct sm_dc_info *sm_dc)
 {
-	sm_dc->wq.cc_cnt += 1;
-
-	if (sm_dc->wq.cc_cnt % 2) {
-		sm_dc->ta.c -= PPS_C_STEP;
-		if (sm_dc->ta.c < sm_dc->config.ta_min_current) {
-			sm_dc->ta.c = sm_dc->config.ta_min_current;
-			pr_info("%s %s: can't used less then ta_min_current\n",
-				sm_dc->name, __func__);
-		}
-	} else {
+	if (sm_dc->ta.v > sm_dc->config.ta_min_voltage)
 		sm_dc->ta.v -= PPS_V_STEP;
-	}
+
 	return;
 }
 
@@ -554,12 +547,16 @@ static void pd_pre_cc_work(struct work_struct *work)
 	struct sm_dc_info *sm_dc = container_of(work, struct sm_dc_info, pre_cc_work.work);
 	int ret, adc_ibus, adc_vbus, adc_vbat;
 	int delay_time = DELAY_PPS_UPDATE;
-	u8 loop_status;
+	u8 loop_status = LOOP_INACTIVE;
 
 	pr_info("%s %s: (CI_GL=%dmA)\n", sm_dc->name, __func__, sm_dc->wq.ci_gl);
 	ret = check_error_state(sm_dc, SM_DC_PRE_CC);
 	if (ret < 0)
 		return;
+	if (ret == SM_DC_ERR_VBATREG)
+		loop_status = LOOP_VBATREG;
+	else if (ret == SM_DC_ERR_IBUSREG)
+		loop_status = LOOP_IBUSREG;
 
 	ret = update_work_state(sm_dc, SM_DC_PRE_CC);
 	if (ret < 0)
@@ -567,7 +564,7 @@ static void pd_pre_cc_work(struct work_struct *work)
 
 	get_adc_values(sm_dc, "[adc-values]:pre_cc_work", &adc_vbus, &adc_ibus, NULL,
 			&adc_vbat, NULL, NULL, NULL);
-	loop_status = sm_dc->ops->get_dc_loop_status(sm_dc->i2c);
+
 	switch (loop_status) {
 	case LOOP_VBATREG:
 		sm_dc->wq.cv_cnt = 0;
@@ -589,9 +586,12 @@ static void pd_pre_cc_work(struct work_struct *work)
 				sm_dc->name, __func__);
 			sm_dc->ta.v -= PPS_V_STEP;
 			if (sm_dc->ta.v < sm_dc->config.ta_min_voltage) {
-				pr_err("%s %s: SM_DC_ERR_FAIL_ADJUST\n", sm_dc->name, __func__);
-				sm_dc->err = SM_DC_ERR_FAIL_ADJUST;
-				request_state_work(sm_dc, SM_DC_ERR, DELAY_NONE);
+				sm_dc->wq.c_offset = 0;
+				sm_dc->wq.cc_limit = 0;
+				sm_dc->wq.cc_cnt = 0;
+				pr_info("%s %s: [request] pre_cc -> cc\n", sm_dc->name, __func__);
+				sm_dc->ops->set_adc_mode(sm_dc->i2c, SM_DC_ADC_MODE_CONTINUOUS);
+				request_state_work(sm_dc, SM_DC_CC, DELAY_ADC_UPDATE);
 				return;
 			}
 		}
@@ -678,7 +678,7 @@ static void pd_cc_work(struct work_struct *work)
 {
 	struct sm_dc_info *sm_dc = container_of(work, struct sm_dc_info, cc_work.work);
 	int ret, adc_ibus, adc_vbus, adc_vbat;
-	u8 loop_status;
+	u8 loop_status = LOOP_INACTIVE;
 #if defined(CONFIG_DUAL_BATTERY_CELL_SENSING)
 	union power_supply_propval value = {0,};
 #endif
@@ -688,6 +688,10 @@ static void pd_cc_work(struct work_struct *work)
 	ret = check_error_state(sm_dc, SM_DC_CC);
 	if (ret < 0)
 		return;
+	if (ret == SM_DC_ERR_VBATREG)
+		loop_status = LOOP_VBATREG;
+	else if (ret == SM_DC_ERR_IBUSREG)
+		loop_status = LOOP_IBUSREG;
 
 	ret = update_work_state(sm_dc, SM_DC_CC);
 	if (ret < 0)
@@ -696,7 +700,6 @@ static void pd_cc_work(struct work_struct *work)
 	get_adc_values(sm_dc, "[adc-values]:cc_work", &adc_vbus, &adc_ibus, NULL,
 			&adc_vbat, NULL, NULL, NULL);
 
-	loop_status = sm_dc->ops->get_dc_loop_status(sm_dc->i2c);
 #if defined(CONFIG_DUAL_BATTERY_CELL_SENSING)
 	psy_do_property("battery", get,
 		POWER_SUPPLY_EXT_PROP_DIRECT_VBAT_CHECK, value);
@@ -767,7 +770,7 @@ static void pd_cv_work(struct work_struct *work)
 {
 	struct sm_dc_info *sm_dc = container_of(work, struct sm_dc_info, cv_work.work);
 	int ret, adc_ibus, adc_vbus, adc_vbat, delay = DELAY_CHG_LOOP;
-	u8 loop_status;
+	u8 loop_status = LOOP_INACTIVE;
 #if defined(CONFIG_DUAL_BATTERY_CELL_SENSING)
 	union power_supply_propval value = {0,};
 #endif
@@ -777,6 +780,10 @@ static void pd_cv_work(struct work_struct *work)
 	ret = check_error_state(sm_dc, SM_DC_CV);
 	if (ret < 0)
 		return;
+	if (ret == SM_DC_ERR_VBATREG)
+		loop_status = LOOP_VBATREG;
+	else if (ret == SM_DC_ERR_IBUSREG)
+		loop_status = LOOP_IBUSREG;
 
 	ret = update_work_state(sm_dc, SM_DC_CV);
 	if (ret < 0)
@@ -785,13 +792,14 @@ static void pd_cv_work(struct work_struct *work)
 	get_adc_values(sm_dc, "[adc-values]:cv_work", &adc_vbus, &adc_ibus, NULL,
 			&adc_vbat, NULL, NULL, NULL);
 
-	loop_status = sm_dc->ops->get_dc_loop_status(sm_dc->i2c);
-	if ((sm_dc->wq.cv_cnt == 0) && (loop_status & LOOP_VBATREG))
+	if ((sm_dc->wq.cv_cnt == 0) && (loop_status & (LOOP_VBATREG | LOOP_IBUSREG)))
 		sm_dc->wq.cv_cnt = 1;
 	else if ((sm_dc->wq.cv_cnt == 1) && (loop_status == LOOP_INACTIVE))
 		sm_dc->wq.cv_cnt = 2;
 
-	if (loop_status & LOOP_VBATREG) {
+	switch (loop_status) {
+	case LOOP_VBATREG:
+	case LOOP_IBUSREG:
 		if (sm_dc->wq.cv_cnt == 1)
 			/* fast decrease PPS_V during on the first vbatreg loop */
 			sm_dc->ta.v -= PPS_V_STEP * 2;
@@ -803,17 +811,23 @@ static void pd_cv_work(struct work_struct *work)
 			return;
 
 		delay = DELAY_PPS_UPDATE;
-	} else if (loop_status & LOOP_THEMREG) {
+		break;
+	case LOOP_THEMREG:
 		if (sm_dc->config.support_pd_remain) {
 			ret = send_power_source_msg(sm_dc);
 			if (ret < 0)
 				return;
 		}
 		delay = DELAY_PPS_UPDATE;
+		break;
+	case LOOP_IBATREG:
+		/* un-used IBATREG*/
+		loop_status = LOOP_INACTIVE;
+		break;
 	}
 
 	/* occurred abnormal CV status */
-	if ((adc_vbat < sm_dc->target_vbat - 100) || (loop_status & LOOP_IBUSREG)) {
+	if (adc_vbat < sm_dc->target_vbat - 100) {
 		pr_info("%s %s: adnormal cv, [request] cv -> pre_cc\n", sm_dc->name, __func__);
 		sm_dc->ops->set_adc_mode(sm_dc->i2c, SM_DC_ADC_MODE_ONESHOT);
 		request_state_work(sm_dc, SM_DC_PRE_CC, DELAY_ADC_UPDATE);
@@ -1124,13 +1138,17 @@ static void wpc_pre_cc_work(struct work_struct *work)
 	struct sm_dc_info *sm_dc = container_of(work, struct sm_dc_info, pre_cc_work.work);
 	int ret, adc_ibus, adc_vbus, adc_vbat;
 	int delay_time = DELAY_WPC_UPDATE;
-	u8 loop_status;
+	u8 loop_status = LOOP_INACTIVE;
 	bool dir;
 
 	pr_info("%s %s: (CI_GL=%dmA)\n", sm_dc->name, __func__, sm_dc->wq.ci_gl);
 	ret = check_error_state(sm_dc, SM_DC_PRE_CC);
 	if (ret < 0)
 		return;
+	if (ret == SM_DC_ERR_VBATREG)
+		loop_status = LOOP_VBATREG;
+	else if (ret == SM_DC_ERR_IBUSREG)
+		loop_status = LOOP_IBUSREG;
 
 	ret = update_work_state(sm_dc, SM_DC_PRE_CC);
 	if (ret < 0)
@@ -1138,7 +1156,7 @@ static void wpc_pre_cc_work(struct work_struct *work)
 
 	get_adc_values(sm_dc, "[adc-values]:pre_cc_work", &adc_vbus, &adc_ibus, NULL,
 			&adc_vbat, NULL, NULL, NULL);
-	loop_status = sm_dc->ops->get_dc_loop_status(sm_dc->i2c);
+
 	switch (loop_status) {
 	case LOOP_VBATREG:
 		sm_dc->wq.cv_cnt = 0;
@@ -1199,7 +1217,7 @@ static void wpc_cc_work(struct work_struct *work)
 {
 	struct sm_dc_info *sm_dc = container_of(work, struct sm_dc_info, cc_work.work);
 	int ret, adc_ibus, adc_vbus, adc_vbat;
-	u8 loop_status;
+	u8 loop_status = LOOP_INACTIVE;
 	bool dir;
 
 	pr_info("%s %s\n", sm_dc->name, __func__);
@@ -1207,6 +1225,10 @@ static void wpc_cc_work(struct work_struct *work)
 	ret = check_error_state(sm_dc, SM_DC_CC);
 	if (ret < 0)
 		return;
+	if (ret == SM_DC_ERR_VBATREG)
+		loop_status = LOOP_VBATREG;
+	else if (ret == SM_DC_ERR_IBUSREG)
+		loop_status = LOOP_IBUSREG;
 
 	ret = update_work_state(sm_dc, SM_DC_CC);
 	if (ret < 0)
@@ -1215,7 +1237,6 @@ static void wpc_cc_work(struct work_struct *work)
 	get_adc_values(sm_dc, "[adc-values]:cc_work", &adc_vbus, &adc_ibus, NULL,
 			&adc_vbat, NULL, NULL, NULL);
 
-	loop_status = sm_dc->ops->get_dc_loop_status(sm_dc->i2c);
 	switch (loop_status) {
 	case LOOP_VBATREG:
 		sm_dc->wq.cv_cnt = 0;
@@ -1271,13 +1292,17 @@ static void wpc_cv_work(struct work_struct *work)
 {
 	struct sm_dc_info *sm_dc = container_of(work, struct sm_dc_info, cv_work.work);
 	int ret, adc_ibus, adc_vbus, adc_vbat, delay = DELAY_CHG_LOOP;
-	u8 loop_status;
+	u8 loop_status = LOOP_INACTIVE;
 
 	pr_info("%s %s\n", sm_dc->name, __func__);
 
 	ret = check_error_state(sm_dc, SM_DC_CV);
 	if (ret < 0)
 		return;
+	if (ret == SM_DC_ERR_VBATREG)
+		loop_status = LOOP_VBATREG;
+	else if (ret == SM_DC_ERR_IBUSREG)
+		loop_status = LOOP_IBUSREG;
 
 	ret = update_work_state(sm_dc, SM_DC_CV);
 	if (ret < 0)
@@ -1286,7 +1311,6 @@ static void wpc_cv_work(struct work_struct *work)
 	get_adc_values(sm_dc, "[adc-values]:cv_work", &adc_vbus, &adc_ibus, NULL,
 			&adc_vbat, NULL, NULL, NULL);
 
-	loop_status = sm_dc->ops->get_dc_loop_status(sm_dc->i2c);
 	if (loop_status & LOOP_VBATREG) {
 		sm_dc->ta.v -= PPS_V_STEP;
 		ret = send_power_source_msg(sm_dc);

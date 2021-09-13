@@ -404,6 +404,8 @@ static bool sec_tclm_check_condition_valid(struct sec_tclm_data *data)
 		} else {
 			return false;
 		}
+	case TCLM_LEVEL_NOT_SUPPORT:
+		return false;
 	}
 
 	return false;

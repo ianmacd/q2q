@@ -2230,6 +2230,12 @@ int cam_sensor_core_power_up(struct cam_sensor_power_ctrl_t *ctrl,
 			if (power_setting->seq_val < num_vreg) {
 				CAM_DBG(CAM_SENSOR, "Enable Regulator");
 				vreg_idx = power_setting->seq_val;
+				CAM_INFO(CAM_SENSOR,
+					"slot[%d] enable[%s] min[%d] max[%d]",
+					soc_info->index,
+					soc_info->rgltr_name[vreg_idx],
+					soc_info->rgltr_min_volt[vreg_idx],
+					soc_info->rgltr_max_volt[vreg_idx]);
 
 				soc_info->rgltr[vreg_idx] =
 					regulator_get(soc_info->dev,

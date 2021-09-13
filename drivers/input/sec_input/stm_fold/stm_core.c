@@ -950,11 +950,9 @@ int stm_ts_input_open(struct input_dev *dev)
 	struct irq_desc *desc = irq_to_desc(ts->irq);
 	int ret;
 
-	if (!ts->info_work_done) {
-		input_err(true, &ts->client->dev, "%s not finished info work\n", __func__);
-		return 0;
-	}
-
+#if IS_ENABLED(CONFIG_QGKI)
+	cancel_delayed_work_sync(&ts->work_read_info);
+#endif
 	mutex_lock(&ts->modechange);
 
 	ts->plat_data->enabled = true;
@@ -1008,10 +1006,9 @@ void stm_ts_input_close(struct input_dev *dev)
 {
 	struct stm_ts_data *ts = input_get_drvdata(dev);
 
-	if (!ts->info_work_done) {
-		input_err(true, &ts->client->dev, "%s not finished info work\n", __func__);
-		return;
-	}
+#if IS_ENABLED(CONFIG_QGKI)
+	cancel_delayed_work_sync(&ts->work_read_info);
+#endif
 	if (ts->plat_data->shutdown_called) {
 		input_err(true, &ts->client->dev, "%s shutdown was called\n", __func__);
 		return;

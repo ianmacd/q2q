@@ -71,6 +71,7 @@ config SEC_FACTORY
 	select SEC_PCIE_KEEP_LINKBW
 	select SEC_GPIO_DVS
 	select EDAC_KRYO_ARM64_PANIC_ON_CE
+	select CNSS2_DEBUG
 	help
 	  It will support a sec factory mode
 endmenu

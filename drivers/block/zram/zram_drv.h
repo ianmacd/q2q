@@ -98,15 +98,26 @@ struct zram_stats {
 #ifdef CONFIG_ZRAM_LRU_WRITEBACK
 	atomic64_t bd_expire;
 	atomic64_t bd_objcnt;
+	atomic64_t bd_size;
+	atomic64_t bd_max_count;
+	atomic64_t bd_max_size;
+	atomic64_t bd_ppr_count;
 	atomic64_t bd_ppr_reads;
 	atomic64_t bd_ppr_writes;
 	atomic64_t bd_ppr_objcnt;
+	atomic64_t bd_ppr_size;
+	atomic64_t bd_ppr_max_count;
+	atomic64_t bd_ppr_max_size;
+	atomic64_t bd_objreads;
+	atomic64_t bd_objwrites;
 #endif
 };
 
 #ifdef CONFIG_ZRAM_LRU_WRITEBACK
 #define ZRAM_WB_THRESHOLD 32
 #define NR_ZWBS 16
+#define NR_FALLOC_PAGES 512
+#define FALLOC_ALIGN_MASK (~(NR_FALLOC_PAGES - 1))
 struct zram_wb_header {
 	u32 index;
 	u32 size;
@@ -198,6 +209,8 @@ struct zram {
 	spinlock_t bitmap_lock;
 	struct zwbs **zwbs;
 	struct wb_dbg *wb_dbg;
+	unsigned long *blk_bitmap;
+	struct mutex blk_bitmap_lock;
 #endif
 };
 #endif
