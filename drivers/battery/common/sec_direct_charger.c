@@ -702,7 +702,7 @@ static int sec_direct_charger_parse_dt(struct device *dev,
 }
 #endif /* CONFIG_OF */
 
-static void sec_direct_charger_check_devs_registered(struct device *dev)
+static int sec_direct_charger_check_devs_registered(struct device *dev)
 {
 	struct device_node *np = dev->of_node;
 	const char *dev_name;
@@ -710,7 +710,7 @@ static void sec_direct_charger_check_devs_registered(struct device *dev)
 
 	if (!np) {
 		pr_err("%s: np NULL\n", __func__);
-		return;
+		return 0;
 	}
 
 	if (!of_property_read_string(np, "charger,direct_charger", &dev_name)) {
@@ -730,8 +730,14 @@ static void sec_direct_charger_check_devs_registered(struct device *dev)
 			power_supply_put(psy_dev);
 		} else {
 			dev_err(dev, "%s: %s is not registered yet\n", __func__, dev_name);
+#if defined(CONFIG_ARCH_QCOM) && !defined(CONFIG_ARCH_EXYNOS) \
+	&& !defined(CONFIG_QGKI)	/* for QC GKI Build */
+			return -EPROBE_DEFER;
+#endif
 		}
 	}
+
+	return 0;
 }
 
 static enum power_supply_property sec_direct_charger_props[] = {
@@ -756,8 +762,10 @@ static int sec_direct_charger_probe(struct platform_device *pdev)
 
 	pr_info("%s: SEC Direct-Charger Driver Loading\n", __func__);
 
-	if (pdev->dev.of_node)
-		sec_direct_charger_check_devs_registered(&pdev->dev);
+	if (pdev->dev.of_node) {
+		if (sec_direct_charger_check_devs_registered(&pdev->dev))
+			return -EPROBE_DEFER;
+	}
 
 	charger = kzalloc(sizeof(*charger), GFP_KERNEL);
 	if (!charger)

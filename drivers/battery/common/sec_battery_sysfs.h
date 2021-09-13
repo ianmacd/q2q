@@ -20,8 +20,6 @@
 #ifndef __SEC_BATTERY_SYSFS_H
 #define __SEC_BATTERY_SYSFS_H __FILE__
 
-extern int factory_mode;
-
 ssize_t sec_bat_show_attrs(struct device *dev,
 				struct device_attribute *attr, char *buf);
 

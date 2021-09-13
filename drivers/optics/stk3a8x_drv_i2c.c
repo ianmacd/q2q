@@ -260,7 +260,7 @@ module_param(print_debug, int, 0644);
 
 module_init(stk3a8x_init);
 module_exit(stk3a8x_exit);
-MODULE_DEVICE_TABLE(i2c, stk_ps_id);
+MODULE_DEVICE_TABLE(i2c, stk_als_id);
 MODULE_AUTHOR("Taka Chiu <taka_chiu@sensortek.com.tw>");
 MODULE_DESCRIPTION("Sensortek stk3a8x ambient Light Sensor driver");
 MODULE_LICENSE("GPL");

@@ -566,14 +566,6 @@ static int max77705_vdm_process_enter_mode(void *data, char *vdm_data, int len)
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_ARCH_QCOM) && !defined(CONFIG_USB_ARCH_EXYNOS)
-int __weak dwc3_restart_usb_host_mode_hs(void)
-{
-	pr_info("%s call weak function\n", __func__);
-	return 0;
-}
-#endif
-
 static int max77705_vdm_dp_select_pin(void *data, int multi)
 {
 	struct max77705_usbc_platform_data *usbpd_data = data;
@@ -610,7 +602,7 @@ static int max77705_vdm_dp_select_pin(void *data, int multi)
 		else
 			msg_maxim("wrong pin assignment value");
 	}
-#if IS_ENABLED(CONFIG_ARCH_QCOM) && !defined(CONFIG_USB_ARCH_EXYNOS)
+#if IS_ENABLED(CONFIG_ARCH_QCOM) && !IS_ENABLED(CONFIG_ARCH_EXYNOS)
 	if (pin_sel == PDIC_NOTIFY_DP_PIN_C ||
 			pin_sel == PDIC_NOTIFY_DP_PIN_E ||
 			pin_sel == PDIC_NOTIFY_DP_PIN_A)

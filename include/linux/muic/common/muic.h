@@ -584,9 +584,6 @@ typedef enum tx_data{
 #endif
 
 #if IS_ENABLED(CONFIG_MUIC_NOTIFIER)
-extern int get_switch_sel(void);
-extern int get_pdic_info(void);
-extern int get_afc_mode(void);
 extern int muic_set_hiccup_mode(int on_off);
 extern int muic_hv_charger_init(void);
 extern int muic_afc_get_voltage(void);
@@ -596,9 +593,6 @@ extern int muic_afc_set_voltage(int voltage);
 extern int muic_hv_charger_disable(bool en);
 
 #else
-static inline int get_switch_sel(void) {return 0; }
-static inline int get_pdic_info(void) {return 0; }
-static inline int get_afc_mode(void) {return 0; }
 static inline int muic_set_hiccup_mode(int on_off) {return 0; }
 static inline int muic_hv_charger_init(void) {return 0; }
 static inline int muic_afc_get_voltage(void) {return 0; }

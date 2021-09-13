@@ -84,6 +84,7 @@ enum driver_modules_status {
 enum driver_modules_status current_driver_status = DRIVER_MODULES_UNINITIALIZED;
 char ver_info[512] = {0,};
 char softap_info[512] = {0,};
+int dump_in_progress = 0;
 
 static void cnss_set_plat_priv(struct platform_device *plat_dev,
 			       struct cnss_plat_data *plat_priv)
@@ -2872,7 +2873,7 @@ static ssize_t store_mac_addr(struct kobject *kobj,
 			    const char *buf,
 			    size_t count)
 {
-	sscanf(buf, "%02X:%02X:%02X:%02X:%02X:%02X",
+	sscanf(buf, "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
 		(const u8*)&mac_from_macloader[0],
 		(const u8*)&mac_from_macloader[1],
 		(const u8*)&mac_from_macloader[2],
@@ -2880,7 +2881,7 @@ static ssize_t store_mac_addr(struct kobject *kobj,
 		(const u8*)&mac_from_macloader[4],
 		(const u8*)&mac_from_macloader[5]);
 
-	cnss_pr_info("Assigning MAC from Macloader %02x:%02x:%02x:%02x:%02x:%02x\n",
+	cnss_pr_info("Assigning MAC from Macloader %02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx\n",
 		mac_from_macloader[0], mac_from_macloader[1],mac_from_macloader[2],
 		mac_from_macloader[3], mac_from_macloader[4],mac_from_macloader[5]);
 
@@ -2895,6 +2896,7 @@ static ssize_t show_verinfo(struct kobject *kobj,
 {
 	return scnprintf(buf, 512, "%s", ver_info);
 }
+
 static ssize_t show_softapinfo(struct kobject *kobj,
 				 struct kobj_attribute *attr,
 				 char *buf)
@@ -2966,6 +2968,26 @@ static ssize_t store_memdump_info(struct kobject *kobj,
 	cnss_pr_info("%s called\n", __func__);
 	return count;
 }
+
+static ssize_t show_dump_in_progress(struct kobject *kobj,
+				 struct kobj_attribute *attr,
+				 char *buf)
+{
+	return scnprintf(buf, 512, "%d", dump_in_progress);
+}
+
+static ssize_t store_dump_in_progress(struct kobject *kobj,
+			    struct kobj_attribute *attr,
+			    const char *buf,
+			    size_t count)
+{
+	cnss_pr_info("%s enter\n", __func__);
+	sscanf(buf, "%d", &dump_in_progress);
+	cnss_pr_info("dump_in_progress %d\n", dump_in_progress);
+
+	return count;
+}
+
 static struct kobj_attribute sec_mac_addr_attribute =
         __ATTR(mac_addr, 0220, NULL, store_mac_addr);
 static struct kobj_attribute sec_verinfo_sysfs_attribute =
@@ -2980,6 +3002,11 @@ static struct kobj_attribute sec_antinfo_sysfs_attribute =
        __ATTR(ant, 0220, NULL, store_ant_info);
 static struct kobj_attribute sec_memdumpinfo_sysfs_attribute =
 	__ATTR(memdump, 0220, NULL, store_memdump_info);
+static struct kobj_attribute sec_dump_in_progress_attribute =
+	__ATTR(dump_in_progress, 0660, show_dump_in_progress,
+	       store_dump_in_progress);
+
+
 
 static struct attribute *sec_sysfs_attrs[] = {
 	&sec_mac_addr_attribute.attr,
@@ -2989,6 +3016,7 @@ static struct attribute *sec_sysfs_attrs[] = {
 	&sec_pminfo_sysfs_attribute.attr,
 	&sec_antinfo_sysfs_attribute.attr,
 	&sec_memdumpinfo_sysfs_attribute.attr,
+	&sec_dump_in_progress_attribute.attr,
 	NULL
 };
 

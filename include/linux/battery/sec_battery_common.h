@@ -238,14 +238,4 @@ static inline struct power_supply *get_power_supply_by_name(char *name)
 	ret;	\
 })
 
-#if IS_ENABLED(CONFIG_SEC_MPARAM) || (IS_MODULE(CONFIG_SEC_PARAM) && defined(CONFIG_ARCH_EXYNOS))
-#define make_get_mparam(mname, pname, type) \
-extern type pname; \
-static inline type mname##_get_##pname(void) { return pname; }
-#else
-#define make_get_mparam(mname, pname, type) \
-static inline type mname##_get_##pname(void) { return 0; }
-#endif
-
-#define get_mparam(mname, pname) mname##_get_##pname()
 #endif /* __SEC_BATTERY_COMMON_H */

@@ -814,7 +814,7 @@ static int fb_state_change(struct notifier_block *nb, unsigned long val,
 	if (val != FB_EVENT_BLANK)
 		return 0;
 
-	
+
 #if IS_ENABLED(CONFIG_SEC_PM_QCOM)
 	blank = *(int *)data;
 #else
@@ -896,6 +896,92 @@ out:
 	return sprintf(buf, "%d\n", result);
 }
 static DEVICE_ATTR(validation, 0444, validation_show, NULL);
+
+/* for LDO burnt: enable/disable all regulator, support only for sm3080 due to hidden register */
+#define NUM_REG	7	/* number of regulator to control */
+
+struct power_sequence {
+    int regulator;
+    int delay;		/* delay after regulator control */
+};
+
+static ssize_t enable_pwr_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct s2dos05_data *info = dev_get_drvdata(dev);
+	struct i2c_client *i2c = info->iodev->i2c;
+	u8 reg_status, ctrl;
+	u8 val, mask;
+	int i;
+	bool enable;
+	int ret;
+
+	/* { regulator - delay } sequence */
+	struct power_sequence en_order[NUM_REG] = {
+					{ S2DOS05_LDO1, 0 },
+					{ S2DOS05_LDO4, 900 },
+					{ SM3080_AVDD, 100 },
+					{ SM3080_ELVDD, 10 },
+					{ SM3080_ELVSS, 1000 },
+					{ S2DOS05_LDO2, 0 },
+					{ S2DOS05_LDO3, 0 } };
+	struct power_sequence dis_order[NUM_REG] = {
+					{ S2DOS05_LDO3, 5 },
+					{ S2DOS05_LDO2, 450 },
+					{ SM3080_ELVDD, 0 },
+					{ SM3080_ELVSS, 50 },
+					{ SM3080_AVDD, 50 },
+					{ S2DOS05_LDO4, 50 },
+					{ S2DOS05_LDO1, 10 } };
+	struct power_sequence *order;	/* be selected by enable */
+
+	ret = strtobool(buf, &enable);
+	if (ret)
+		return ret;
+
+	s2dos05_read_reg(i2c, S2DOS05_REG_STAT, &reg_status);
+	s2dos05_read_reg(i2c, S2DOS05_REG_EN, &ctrl);
+	dev_info(&i2c->dev, "++%s: en(%d), status(0x%02x), ctrl(0x%02x)\n",
+					__func__, enable, reg_status, ctrl);
+
+	order = enable ? en_order : dis_order;
+
+	for (i = 0; i < NUM_REG; i++) {
+		val = enable << order[i].regulator;
+		mask = 1 << order[i].regulator;
+
+		ret = s2dos05_update_reg(i2c, S2DOS05_REG_EN, val, mask);
+
+		msleep(order[i].delay);
+	}
+
+	/* enable fd because of el power on */
+	if (enable)
+		ret = s2dos05_update_reg(i2c, S2DOS05_REG_UVLO_FD, 0, 1);
+
+	s2dos05_read_reg(i2c, S2DOS05_REG_STAT, &reg_status);
+	s2dos05_read_reg(i2c, S2DOS05_REG_EN, &ctrl);
+	dev_info(&i2c->dev, "--%s: en(%d), status(0x%02x), ctrl(0x%02x)\n",
+					__func__, enable, reg_status, ctrl);
+
+	return count;
+}
+
+static ssize_t enable_pwr_show(struct device *dev,
+                struct device_attribute *attr, char *buf)
+{
+    struct s2dos05_data *s2dos05 = dev_get_drvdata(dev);
+    struct i2c_client *i2c = s2dos05->iodev->i2c;
+    u8 reg_status, ctrl;
+
+    s2dos05_read_reg(i2c, S2DOS05_REG_STAT, &reg_status);
+    s2dos05_read_reg(i2c, S2DOS05_REG_EN, &ctrl);
+    dev_info(&i2c->dev, "%s: status(0x%02x), ctrl(0x%02x)\n",
+                    __func__, reg_status, ctrl);
+
+    return sprintf(buf, "0x%02x\n0x%02x\n", reg_status, ctrl);
+}
+static DEVICE_ATTR(enable_pwr, 0664, enable_pwr_show, enable_pwr_store);
 #endif /* CONFIG_SEC_FACTORY */
 
 static int s2dos05_sec_pm_init(struct s2dos05_data *info)
@@ -947,11 +1033,22 @@ static int s2dos05_sec_pm_init(struct s2dos05_data *info)
 			dev_attr_validation.attr.name);
 		goto remove_sec_disp_enable_fd;
 	}
+
+	if (iodev->is_sm3080) {
+		ret = device_create_file(iodev->sec_disp_pmic_dev, &dev_attr_enable_pwr);
+		if (ret) {
+			pr_err("s2dos05_sysfs: failed to create enable_pwr file, %s\n",
+				dev_attr_enable_pwr.attr.name);
+			goto remove_sec_disp_validation;
+		}
+	}
 #endif /* CONFIG_SEC_FACTORY */
 
 	return 0;
 
 #if IS_ENABLED(CONFIG_SEC_FACTORY)
+remove_sec_disp_validation:
+	device_remove_file(info->iodev->sec_disp_pmic_dev, &dev_attr_validation);
 remove_sec_disp_enable_fd:
 	device_remove_file(info->iodev->sec_disp_pmic_dev, &dev_attr_enable_fd);
 #endif /* CONFIG_SEC_FACTORY */
@@ -969,6 +1066,7 @@ static void s2dos05_sec_pm_deinit(struct s2dos05_data *info)
 #endif
 #if IS_ENABLED(CONFIG_SEC_FACTORY)
 	device_remove_file(info->iodev->sec_disp_pmic_dev, &dev_attr_validation);
+	device_remove_file(info->iodev->sec_disp_pmic_dev, &dev_attr_enable_pwr);
 #endif /* CONFIG_SEC_FACTORY */
 	sec_device_destroy(info->iodev->sec_disp_pmic_dev->devt);
 }
@@ -1059,7 +1157,7 @@ static int s2dos05_pmic_probe(struct i2c_client *i2c,
 	if (ret < 0) {
 		dev_err(&i2c->dev, "Failed to read DEVICE ID address\n");
 		goto err_s2dos05_data;
-	} 
+	}
 
 	if (val & (1 << 7)) {
 		iodev->is_sm3080 = true;

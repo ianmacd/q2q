@@ -800,7 +800,7 @@ static int akm_parse_dt(struct i2c_client *client)
 
 	pdata->gpio_int = of_get_named_gpio(np, "akm,gpio_int", 0);
 	if (gpio_is_valid(pdata->gpio_int)) {
-		ret = gpio_request_one(pdata->gpio_int, GPIOF_DIR_IN, "akm,gpio_int");
+		ret = devm_gpio_request_one(&client->dev, pdata->gpio_int, GPIOF_DIR_IN, "akm,gpio_int");
 		if (ret)
 			input_err(true, &client->dev, "%s: failed to request gpio_int: %d\n", __func__, pdata->gpio_int);
 		input_info(true, &client->dev, "%s: gpio_int: %d\n", __func__, gpio_get_value(pdata->gpio_int));
@@ -808,14 +808,25 @@ static int akm_parse_dt(struct i2c_client *client)
 
 	pdata->gpio_rst = of_get_named_gpio(np, "akm,gpio_rst", 0);
 	if (gpio_is_valid(pdata->gpio_rst)) {
-		ret = gpio_request_one(pdata->gpio_rst, GPIOF_DIR_IN, "akm,gpio_rst");
+		ret = devm_gpio_request_one(&client->dev, pdata->gpio_rst, GPIOF_DIR_IN, "akm,gpio_rst");
 		if (ret)
 			input_err(true, &client->dev, "%s: failed to request gpio_rst: %d\n", __func__, pdata->gpio_rst);
 		input_info(true, &client->dev, "%s: gpio_rst: %d\n", __func__, gpio_get_value(pdata->gpio_rst));
 	}
 
 	pdata->dvdd = devm_regulator_get(&client->dev, "dvdd");
+	if (IS_ERR_OR_NULL(pdata->dvdd)) {
+		input_err(true, dev, "%s: Failed to get %s regulator.\n",
+				__func__, "dvdd");
+		return -EINVAL;
+	}
+
 	pdata->pullup = devm_regulator_get(&client->dev, "pullup");
+	if (IS_ERR_OR_NULL(pdata->pullup)) {
+		input_err(true, dev, "%s: Failed to get %s regulator.\n",
+				__func__, "pullup");
+		return -EINVAL;
+	}
 
 	of_property_read_u32_array(np, "akm,measurement_number", buf, 1);
 	pdata->measurement_number = buf[0];
@@ -882,8 +893,13 @@ static int akm_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		client->dev.platform_data = pdata;
 
 		ret = akm_parse_dt(client);
-		if (ret < 0)
+		if (ret < 0) {
+#if !IS_ENABLED(CONFIG_QGKI)
+			return -EPROBE_DEFER;
+#else
 			return -ENODEV;
+#endif
+		}
 	} else {
 		input_err(true, &client->dev, "%s: failed to find platform data\n", __func__);
 		return -ENODEV;

@@ -514,6 +514,11 @@ int sensors_register(struct device *dev, void *drvdata,
 void sensors_unregister(struct device * const dev,
 	struct device_attribute *attributes[]);
 
+#ifdef CONFIG_ARCH_EXYNOS
+        #define vfs_read(a, b, c, d)
+        #define vfs_write(a, b, c, d)
+#endif
+
 #ifdef STK_FIFO_ENABLE
 	void stk3a8x_free_fifo_data(struct stk3a8x_data *alps_data);
 	void stk3a8x_alloc_fifo_data(struct stk3a8x_data *alps_data, uint32_t size);

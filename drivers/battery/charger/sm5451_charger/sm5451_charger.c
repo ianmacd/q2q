@@ -27,7 +27,7 @@
 #include <linux/sti/abc_common.h>
 #endif
 
-#define SM5451_DC_VERSION  "UF3"
+#define SM5451_DC_VERSION  "UG3"
 
 static int sm5451_read_reg(struct sm5451_charger *sm5451, u8 reg, u8 *dest)
 {
@@ -43,6 +43,8 @@ static int sm5451_read_reg(struct sm5451_charger *sm5451, u8 reg, u8 *dest)
 		} else {
 			break;
 		}
+		if (cnt == 0)
+			msleep(30);
 	}
 
 	if (ret < 0) {
@@ -68,6 +70,8 @@ int sm5451_bulk_read(struct sm5451_charger *sm5451, u8 reg, int count, u8 *buf)
 		} else {
 			break;
 		}
+		if (cnt == 0)
+			msleep(30);
 	}
 
 	return ret;
@@ -87,6 +91,8 @@ static int sm5451_write_reg(struct sm5451_charger *sm5451, u8 reg, u8 value)
 		} else {
 			break;
 		}
+		if (cnt == 0)
+			msleep(30);
 	}
 
 	return ret;
@@ -253,6 +259,7 @@ static int sm5451_enable_adc_oneshot(struct sm5451_charger *sm5451, u8 enable)
 				break;
 		}
 	} else {
+		msleep(30);
 		ret = sm5451_write_reg(sm5451, SM5451_REG_ADC_CNTL, 0x0);
 	}
 
@@ -297,7 +304,9 @@ static void sm5451_init_reg_param(struct sm5451_charger *sm5451)
 	sm5451_write_reg(sm5451, SM5451_REG_IBAT_OCP, 0x7C);            /* IBATOCP = disabled */
 	sm5451_write_reg(sm5451, SM5451_REG_REG1, 0x07);                /* IBATREG = disabled, VBATREG = 200mV below VBATOVP */
 	sm5451_write_reg(sm5451, SM5451_REG_CNTL3, 0xA3);               /* RLTVOVP = disabled, RLTVUVP = 1.01x */
+	sm5451_write_reg(sm5451, SM5451_REG_CNTL4, 0x00);               /* VDSQRBP = disabled */
 	sm5451_write_reg(sm5451, SM5451_REG_IBATOCP_DG, 0x88);          /* Deglitch for IBATOCP & IBUSOCP = 50us to 8ms */
+	sm5451_write_reg(sm5451, SM5451_REG_VDSQRB_DG, 0x05);			/* Deglitch for VDSQRB = 5ms to 200ms */
 	sm5451_write_reg(sm5451, SM5451_REG_CNTL5, 0x3F);         		/* IBUSOCP_RVS = enable, threshold = 4.5A */
 }
 
@@ -505,6 +514,7 @@ static int sm5451_stop_charging(struct sm5451_charger *sm5451)
 {
 	struct sm_dc_info *sm_dc = select_sm_dc_info(sm5451);
 
+	msleep(30);
 	sm_dc_stop_charging(sm_dc);
 
 	__pm_relax(sm5451->chg_ws);
@@ -1040,7 +1050,7 @@ static u32 sm5451_get_dc_error_status(struct i2c_client *i2c)
 		sm_dc->wq.retry_cnt++;
 		err = SM_DC_ERR_RETRY;
 	} else if (op_mode == OP_MODE_INIT) {
-		if ((flag1 & SM5451_FLAG1_IBUSUCP) || (flag1_s == SM5451_FLAG1_IBUSUCP))
+		if ((flag1 & SM5451_FLAG1_IBUSUCP) || (flag1_s & SM5451_FLAG1_IBUSUCP))
 			err += SM_DC_ERR_IBUSUCP;
 		if ((flag3 & SM5451_FLAG3_VBUSUVLO) || (flag3_s & SM5451_FLAG3_VBUSUVLO))
 			err += SM_DC_ERR_VBUSUVLO;
@@ -1058,8 +1068,14 @@ static u32 sm5451_get_dc_error_status(struct i2c_client *i2c)
 		pr_info("%s %s: SM_DC_ERR(err=0x%x)\n", sm_dc->name, __func__, err);
 	} else {
 		if (flag3_s & SM5451_FLAG3_VBUSUVLO) {
-			pr_info("%s %s: vbus uvlo detect, try to retry\n", sm_dc->name, __func__);
+			pr_info("%s %s: vbus uvlo detected, try to retry\n", sm_dc->name, __func__);
 			err = SM_DC_ERR_RETRY;
+		} else if ((flag2 & SM5451_FLAG2_VBATREG) || (flag2_s & SM5451_FLAG2_VBATREG)) {
+			pr_info("%s %s: VBATREG detected\n", sm_dc->name, __func__);
+			err = SM_DC_ERR_VBATREG;
+		} else if (flag4_s & SM5451_FLAG4_IBUSREG) {
+			pr_info("%s %s: IBUSREG detected\n", sm_dc->name, __func__);
+			err = SM_DC_ERR_IBUSREG;
 		}
 	}
 
@@ -1068,30 +1084,6 @@ static u32 sm5451_get_dc_error_status(struct i2c_client *i2c)
 	}
 
 	return err;
-}
-
-static int sm5451_get_dc_loop_status(struct i2c_client *i2c)
-{
-	struct sm5451_charger *sm5451 = i2c_get_clientdata(i2c);
-	struct sm_dc_info *sm_dc = select_sm_dc_info(sm5451);
-	int loop_status = LOOP_INACTIVE;
-	u8 flag2, flag4;
-
-	flag2 = sm5451_get_flag_status(sm5451, SM5451_REG_FLAG2);
-	flag4 = sm5451_get_flag_status(sm5451, SM5451_REG_FLAG4);
-	pr_info("%s %s: flag2=0x%x, flag4=0x%x\n", sm_dc->name,
-		__func__, flag2, flag4);
-
-	if (flag2 & SM5451_FLAG2_VBATREG) {
-		loop_status = LOOP_VBATREG;
-	} else if (flag4 & SM5451_FLAG4_IBUSREG) {
-		loop_status = LOOP_IBUSREG;
-	} else if (flag2 & SM5451_FLAG2_IBATREG) {
-		loop_status = LOOP_IBATREG;
-	}
-	pr_info("%s %s: loop_status=0x%x\n", sm_dc->name, __func__, loop_status);
-
-	return loop_status;
 }
 
 static int sm5451_send_pd_msg(struct i2c_client *i2c, struct sm_dc_power_source_info *ta)
@@ -1121,7 +1113,6 @@ static const struct sm_dc_ops sm5451_dc_pps_ops = {
 	.get_dc_error_status    = sm5451_get_dc_error_status,
 	.set_charging_enable    = sm5451_set_charging_enable,
 	.set_charging_config    = sm5451_dc_set_charging_config,
-	.get_dc_loop_status     = sm5451_get_dc_loop_status,
 	.send_power_source_msg  = sm5451_send_pd_msg,
 };
 
@@ -1283,8 +1274,21 @@ static int sm5451_charger_parse_dt(struct device *dev,
 		return -EINVAL;
 	}
 	pdata->irq_gpio = of_get_named_gpio(np_sm5451, "sm5451,irq-gpio", 0);
-
 	dev_info(dev, "parse_dt: irq_gpio=%d\n", pdata->irq_gpio);
+
+	ret = of_property_read_u32(np_sm5451, "sm5451,pps_lr", &pdata->pps_lr);
+	if (ret) {
+		dev_info(dev, "%s: sm5451,pps_lr is Empty\n", __func__);
+		pdata->pps_lr = 340000;
+	}
+	dev_info(dev, "parse_dt: pps_lr=%d\n", pdata->pps_lr);
+
+	ret = of_property_read_u32(np_sm5451, "sm5451,rpcm", &pdata->rpcm);
+	if (ret) {
+		dev_info(dev, "%s: sm5451,rpcm is Empty\n", __func__);
+		pdata->rpcm = 55000;
+	}
+	dev_info(dev, "parse_dt: rpcm=%d\n", pdata->rpcm);
 
 	/* Parse: battery node */
 	np_battery = of_find_node_by_name(NULL, "battery");
@@ -1563,10 +1567,10 @@ static int sm5451_charger_probe(struct i2c_client *i2c,
 	pps_dc->config.ta_min_voltage = 8200;
 	pps_dc->config.dc_min_vbat = 3100;
 	pps_dc->config.dc_vbus_ovp_th = 11000;
-	pps_dc->config.pps_lr = 340000;
+	pps_dc->config.pps_lr = pdata->pps_lr;
 	pps_dc->config.rpara = 150000;
 	pps_dc->config.rsns = 0;
-	pps_dc->config.rpcm = 55000;
+	pps_dc->config.rpcm = pdata->rpcm;;
 	pps_dc->config.topoff_current = 900;
 	pps_dc->config.need_to_sw_ocp = 0;
 	pps_dc->config.support_pd_remain = 1;        /* if pdic can't support PPS remaining, plz activate it. */

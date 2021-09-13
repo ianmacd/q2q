@@ -63,7 +63,7 @@ struct hall_drvdata {
 #endif
 };
 
-static int hall_logical_status = 1;
+static int hall_logical_status = 0;
 
 #if IS_ENABLED(CONFIG_DRV_SAMSUNG)
 static ssize_t hall_logical_detect_show(struct device *dev,
@@ -84,7 +84,7 @@ static DEVICE_ATTR_RO(hall_logical_detect);
 static int hall_logical_open(struct input_dev *input)
 {
 	/* Report current state of buttons that are connected to GPIOs */
-	input_report_switch(input, SW_FLIP, 0);
+	input_report_switch(input, SW_FLIP, hall_logical_status);
 	input_sync(input);
 
 	return 0;

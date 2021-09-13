@@ -360,21 +360,21 @@ struct max77705_charger_data {
 	struct power_supply	*psy_otg;
 
 	struct workqueue_struct *wqueue;
-	struct delayed_work	chgin_work;
 	struct delayed_work	aicl_work;
 	struct delayed_work	isr_work;
 	struct delayed_work wc_current_work;
+	struct delayed_work wc_chg_current_work;
 
 	/* mutex */
 	struct mutex            charger_mutex;
 	struct mutex            mode_mutex;
 
 	/* wakelock */
-	struct wakeup_source *chgin_ws;
 	struct wakeup_source *wc_current_ws;
 	struct wakeup_source *aicl_ws;
 	struct wakeup_source *otg_ws;
 	struct wakeup_source *sysovlo_ws;
+	struct wakeup_source *wc_chg_current_ws;
 
 	unsigned int	is_charging;
 	unsigned int	cable_type;

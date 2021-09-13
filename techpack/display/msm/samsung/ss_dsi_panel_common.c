@@ -756,7 +756,9 @@ void ss_event_frame_update_post(struct samsung_display_driver_data *vdd)
 			LCD_INFO(vdd, "self_grid [ON]\n");
 		}
 
-		ss_send_cmd(vdd, TX_DISPLAY_ON);
+		if (!SS_IS_CMDS_NULL(ss_get_cmds(vdd, TX_DISPLAY_ON)))
+			ss_send_cmd(vdd, TX_DISPLAY_ON);
+
 		vdd->display_status_dsi.wait_disp_on = false;
 		if (vdd->display_status_dsi.first_commit_disp_on) {
 			if (!SS_IS_CMDS_NULL(ss_get_cmds(vdd, TX_FIRST_DISPLAY_ON))) {
@@ -3184,8 +3186,8 @@ int ss_panel_off_post(struct samsung_display_driver_data *vdd)
 	if (vdd->br_info.common_br.finger_mask_hbm_on)
 		vdd->br_info.common_br.finger_mask_hbm_on = false;
 
-	LCD_INFO(vdd, "-\n");
-	SS_XLOG(SS_XLOG_FINISH);
+	LCD_INFO(vdd, "- : mdp underrun: %d\n", vdd->cnt_mdp_clk_underflow);
+	SS_XLOG(vdd->cnt_mdp_clk_underflow);
 
 	return ret;
 }

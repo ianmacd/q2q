@@ -2459,6 +2459,9 @@ struct samsung_display_driver_data {
 
 	/* flag that display_on (29h) is on/off */
 	bool display_on;
+
+	/* mdp clock underflow */
+	int cnt_mdp_clk_underflow;
 };
 
 extern struct list_head vdds_list;

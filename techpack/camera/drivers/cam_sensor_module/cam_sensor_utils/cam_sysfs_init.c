@@ -2054,6 +2054,8 @@ static ssize_t rear2_type_show(struct device *dev,
 #elif defined(CONFIG_SEC_R9Q_PROJECT)
 	char cam_type_sony[] = "SONY_IMX258\n";
 	char cam_type_hynix[] = "HYNIX_HI1336C\n";
+#elif defined(CONFIG_SEC_O1Q_PROJECT) || defined(CONFIG_SEC_T2Q_PROJECT) || defined(CONFIG_SEC_P3Q_PROJECT)
+	char cam_type[] = "SONY_IMX563\n";
 #else
 	char cam_type[] = "";
 #endif

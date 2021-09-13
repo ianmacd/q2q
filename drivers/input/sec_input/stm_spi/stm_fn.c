@@ -1824,7 +1824,7 @@ int get_nvm_data_by_size(struct stm_ts_data *ts, u8 offset, int length, u8 *nvda
 	address[1] = 0x06;
 	address[2] = 0x90;
 
-	ret = stm_ts_wait_for_echo_event(ts, &address[0], 3, 0);
+	ret = stm_ts_wait_for_echo_event(ts, &address[0], 3, 50);
 	if (ret < 0) {
 		input_err(true, &ts->client->dev,
 				"%s: timeout. ret: %d\n", __func__, ret);

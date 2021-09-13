@@ -124,6 +124,14 @@ int cam_cci_init(struct v4l2_subdev *sd,
 		return rc;
 	}
 
+	CAM_INFO(CAM_CCI,
+		"debug init cci:%d ref:%d master:%d sid:0x%x freq:%d",
+		cci_dev->soc_info.index,
+		cci_dev->ref_count,
+		master,
+		c_ctrl->cci_info->sid,
+		c_ctrl->cci_info->i2c_freq_mode);
+
 	if (cci_dev->ref_count++) {
 		rc = cam_cci_init_master(cci_dev, master);
 		if (rc) {

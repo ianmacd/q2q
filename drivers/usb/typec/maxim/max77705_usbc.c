@@ -1908,8 +1908,10 @@ int max77705_i2c_opcode_read(struct max77705_usbc_platform_data *usbc_data,
 	 */
 
 	/* Read opcode data */
-	size = max77705_bulk_read(usbc_data->muic, OPCODE_READ,
-			length + OPCODE_SIZE, values);
+    max77705_bulk_read(usbc_data->muic, OPCODE_READ, OPCODE_SIZE, values);
+    if (length > 0)
+        size = max77705_bulk_read(usbc_data->muic, OPCODE_READ + OPCODE_SIZE,
+                length, values + OPCODE_SIZE);
 
 #if 0
 	int i = 0; // To use this, move int i to the top to avoid build error
@@ -2017,7 +2019,7 @@ static void max77705_irq_execute(struct max77705_usbc_platform_data *usbc_data,
 		const usbc_cmd_data *cmd_data)
 {
 	int len = cmd_data->read_length;
-	unsigned char data[OPCODE_DATA_LENGTH] = {0,};
+	unsigned char data[OPCODE_DATA_LENGTH + OPCODE_SIZE] = {0,};
 	u8 response = 0xff;
 	u8 vdm_opcode_header = 0x0;
 	UND_DATA_MSG_VDM_HEADER_Type vdm_header;
@@ -2028,7 +2030,7 @@ static void max77705_irq_execute(struct max77705_usbc_platform_data *usbc_data,
 	uint8_t W_DATA = 0x0;
 
 	memset(&vdm_header, 0, sizeof(UND_DATA_MSG_VDM_HEADER_Type));
-	max77705_i2c_opcode_read(usbc_data, cmd_data->opcode,
+	max77705_i2c_opcode_read(usbc_data, cmd_data->response,
 			len, data);
 
 	/* opcode identifying the messsage type. (0x51)*/

@@ -5788,7 +5788,7 @@ static void fod_enable(void *device_data)
 	mutex_lock(&ts->modechange);
 
 	if (!ts->plat_data->enabled && !ts->plat_data->lowpower_mode && !ts->plat_data->pocket_mode
-			&& !ts->plat_data->ed_enable && !ts->plat_data->support_fod_lp_mode) {
+			&& !ts->plat_data->ed_enable && !ts->plat_data->fod_lp_mode) {
 		if (device_may_wakeup(&ts->client->dev) && ts->plat_data->power_state == SEC_INPUT_STATE_LPM)
 			disable_irq_wake(ts->client->irq);
 		ts->plat_data->stop_device(ts);

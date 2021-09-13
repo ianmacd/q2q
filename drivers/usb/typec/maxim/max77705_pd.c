@@ -41,11 +41,22 @@
 #include <linux/battery/sec_battery_common.h>
 #include <linux/battery/sec_pd.h>
 
+#if IS_ENABLED(CONFIG_SEC_MPARAM) || (IS_MODULE(CONFIG_SEC_PARAM) && defined(CONFIG_ARCH_EXYNOS))
 #if defined(CONFIG_SEC_FACTORY)
 extern int factory_mode;
 #endif
+#else
+#if defined(CONFIG_SEC_FACTORY)
+static int __read_mostly factory_mode;
+module_param(factory_mode, int, 0444);
+#endif
+#endif
 
 extern struct max77705_usbc_platform_data *g_usbc_data;
+
+#if defined(CONFIG_SEC_FACTORY)
+static int max77705_get_facmode(void) { return factory_mode; }
+#endif
 
 static void max77705_process_pd(struct max77705_usbc_platform_data *usbc_data)
 {
@@ -381,7 +392,7 @@ void max77705_set_fw_noautoibus(int enable)
 	}
 
 #if defined(CONFIG_SEC_FACTORY)
-	if (factory_mode) {
+	if (max77705_get_facmode()) {
 		pr_info("%s: Factory Mode set AUTOIBUS_FW_AT_OFF\n", __func__);
 		op_data = 0x03; /* usbc fw off & auto off(manual on) */
 	}

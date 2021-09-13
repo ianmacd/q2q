@@ -12,8 +12,6 @@
 #include "sec_battery.h"
 #include "sec_battery_ttf.h"
 
-make_get_mparam(sec_bat, lpcharge, unsigned int);
-
 #define is_ttf_thermal_zone(thermal_zone) ( \
 	thermal_zone == BAT_THERMAL_NORMAL || \
 	thermal_zone == BAT_THERMAL_COOL1 || \
@@ -130,7 +128,7 @@ void sec_bat_calc_time_to_full(struct sec_battery_info * battery)
 			battery->cable_type == SEC_BATTERY_CABLE_PREPARE_WIRELESS_20) {
 			if (sec_bat_hv_wc_normal_mode_check(battery))
 				charge = battery->ttf_d->ttf_wireless_charge_current;
-			else if ((battery->cable_type == SEC_BATTERY_CABLE_PREPARE_WIRELESS_20 && !get_mparam(sec_bat, lpcharge)) ||
+			else if ((battery->cable_type == SEC_BATTERY_CABLE_PREPARE_WIRELESS_20 && !sec_bat_get_lpmode()) ||
 				battery->cable_type == SEC_BATTERY_CABLE_HV_WIRELESS_20)
 				charge = battery->ttf_d->ttf_predict_wc20_charge_current;
 			else
@@ -318,7 +316,7 @@ void sec_bat_time_to_full_work(struct work_struct *work)
 
 void ttf_work_start(struct sec_battery_info *battery)
 {
-	if (get_mparam(sec_bat, lpcharge)) {
+	if (sec_bat_get_lpmode()) {
 		cancel_delayed_work(&battery->ttf_d->timetofull_work);
 		if (battery->current_event & SEC_BAT_CURRENT_EVENT_AFC) {
 			int work_delay = 0;

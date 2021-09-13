@@ -2083,6 +2083,9 @@ int cam_sensor_power_up(struct cam_sensor_ctrl_t *s_ctrl)
 		cam_sensor_set_regulator_mode(soc_info, REGULATOR_MODE_FAST);
 #endif
 
+	CAM_INFO(CAM_SENSOR, "sensor[%d] powerup",
+		s_ctrl->soc_info.index);
+
 	rc = cam_sensor_core_power_up(power_info, soc_info);
 	if (rc < 0) {
 		CAM_ERR(CAM_SENSOR, "power up the core is failed:%d", rc);
@@ -2101,6 +2104,9 @@ int cam_sensor_power_up(struct cam_sensor_ctrl_t *s_ctrl)
 		CAM_ERR(CAM_SENSOR, "cci_init failed: rc: %d", rc);
 		goto cci_failure;
 	}
+
+	CAM_INFO(CAM_SENSOR, "sensor[%d] cci init done",
+		s_ctrl->soc_info.index);
 
 	return rc;
 cci_failure:
@@ -2298,6 +2304,9 @@ int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 			break;
 		}
 		case CAM_SENSOR_PACKET_OPCODE_SENSOR_INITIAL_CONFIG: {
+			CAM_INFO(CAM_SENSOR, "sensor[%d] init start",
+				s_ctrl->soc_info.index);
+
 			i2c_set = &s_ctrl->i2c_data.init_settings;
 			break;
 		}
@@ -2341,6 +2350,11 @@ int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 #if 1
 			cam_sensor_post_apply_settings(s_ctrl, opcode);
 #endif
+		}
+
+		if (opcode == CAM_SENSOR_PACKET_OPCODE_SENSOR_INITIAL_CONFIG) {
+			CAM_INFO(CAM_SENSOR, "sensor[%d] init done",
+				s_ctrl->soc_info.index);
 		}
 	} else if (req_id > 0) {
 		offset = req_id % MAX_PER_FRAME_ARRAY;

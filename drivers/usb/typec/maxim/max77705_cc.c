@@ -254,7 +254,7 @@ void max77705_notify_dr_status(struct max77705_usbc_platform_data *usbpd_data, u
 					PDIC_NOTIFY_DEV_USB, PDIC_NOTIFY_ID_USB,
 					0/*attach*/, USB_STATUS_NOTIFY_DETACH/*drp*/, 0);
 				usbpd_data->is_client = CLIENT_OFF;
-#if IS_ENABLED(CONFIG_IF_CB_MANAGER)
+#if IS_ENABLED(CONFIG_IF_CB_MANAGER) && IS_ENABLED(CONFIG_BATTERY_SAMSUNG)
 				usb_set_vbus_current(usbpd_data->man, USB_CURRENT_CLEAR);
 #endif
 			}

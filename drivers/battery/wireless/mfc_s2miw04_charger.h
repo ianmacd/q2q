@@ -668,16 +668,17 @@ enum {
 };
 
 enum {
-	MFC_VOUT_5V = 0,
-	MFC_VOUT_5_5V,	// 1
-	MFC_VOUT_6V, // 2
-	MFC_VOUT_7V, // 3
-	MFC_VOUT_8V, // 4
-	MFC_VOUT_9V, // 5
-	MFC_VOUT_10V, // 6
-	MFC_VOUT_11V, // 7
-	MFC_VOUT_12V, // 8
-	MFC_VOUT_12_5V, // 9
+	MFC_VOUT_4_5V = 0,
+	MFC_VOUT_5V,	// 1
+	MFC_VOUT_5_5V,	// 2
+	MFC_VOUT_6V, // 3
+	MFC_VOUT_7V, // 4
+	MFC_VOUT_8V, // 5
+	MFC_VOUT_9V, // 6
+	MFC_VOUT_10V, // 7
+	MFC_VOUT_11V, // 8
+	MFC_VOUT_12V, // 9
+	MFC_VOUT_12_5V, // 10
 };
 
 /* PAD Vout */
@@ -791,6 +792,8 @@ enum mfc_headroom {
 	MFC_HEADROOM_3, /* 0.650V */
 	MFC_HEADROOM_4, /* 0.030V */
 	MFC_HEADROOM_5, /* 0.082V */
+	MFC_HEADROOM_6, /* 0.097V */
+	MFC_HEADROOM_7, /* -0.600V */
 };
 
 #define DEFAULT_PAD_ID		0
@@ -872,6 +875,7 @@ struct mfc_charger_platform_data {
 	bool wpc_vout_ctrl_lcd_on;
 	int no_hv;
 	bool keep_tx_vout;
+	bool wpc_vout_ctrl_full;
 #if defined(CONFIG_TX_GEAR_PHM_VOUT_CTRL)
 	u32 phm_vout_ctrl_dev;
 #endif

@@ -352,7 +352,7 @@ bool sec_bat_check_dc_step_charging(struct sec_battery_info *battery)
 		pr_info("%s : mc:%dmV, sc:%dmV, val=%dmV\n", __func__, battery->voltage_cell_main, battery->voltage_cell_sub, value);
 #else
 		if (battery->dc_step_chg_type & STEP_CHARGING_CONDITION_FLOAT_VOLTAGE)
-			value = battery->voltage_now + DIRECT_CHARGING_FLOAT_VOLTAGE_MARGIN;
+			value = battery->voltage_now + battery->pdata->dc_step_chg_cond_v_margin;
 		else
 			value = battery->voltage_avg;
 #endif
@@ -646,6 +646,14 @@ int sec_dc_step_charging_dt(struct sec_battery_info *battery, struct device *dev
 				battery->dc_step_chg_type & ~STEP_CHARGING_CONDITION_FLOAT_VOLTAGE);
 			battery->dc_step_chg_type &= ~STEP_CHARGING_CONDITION_FLOAT_VOLTAGE;
 		} else {
+			ret = of_property_read_u32(np, "battery,dc_step_chg_cond_v_margin",
+					&battery->pdata->dc_step_chg_cond_v_margin);
+			if (ret)
+				battery->pdata->dc_step_chg_cond_v_margin = DIRECT_CHARGING_FLOAT_VOLTAGE_MARGIN;
+
+			pr_err("%s: dc_step_chg_cond_v_margin is %d\n",
+				__func__, battery->pdata->dc_step_chg_cond_v_margin);
+
 			len = len / sizeof(u32);
 			pr_info("%s: step(%d) * age_step(%d), dc_step_chg_val_vfloat len(%d)\n",
 				__func__, battery->dc_step_chg_step, num_age_step, len);

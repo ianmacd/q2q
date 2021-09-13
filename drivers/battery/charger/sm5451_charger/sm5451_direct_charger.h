@@ -74,7 +74,9 @@ enum sm_dc_state {
 };
 enum sm_dc_err_index {
 	SM_DC_ERR_NONE              = (0x0),
-	SM_DC_ERR_TSD               = (0x1 << 1),
+	SM_DC_ERR_VBATREG           = (0x1 << 0),
+	SM_DC_ERR_IBUSREG           = (0x1 << 1),
+	SM_DC_ERR_TSD               = (0x1 << 2),
 	SM_DC_ERR_VBATOVP           = (0x1 << 3),
 	SM_DC_ERR_VOUTOVP           = (0x1 << 4),
 	SM_DC_ERR_IBUSUCP           = (0x1 << 5),
@@ -130,7 +132,6 @@ struct sm_dc_ops {
 	int (*set_charging_enable)(struct i2c_client *i2c, bool enable);
 	int (*set_charging_config)(struct i2c_client *i2c, u32 cv_gl, u32 ci_gl, u32 cc_gl);
 	u32 (*get_dc_error_status)(struct i2c_client *i2c);
-	int (*get_dc_loop_status)(struct i2c_client *i2c);
 	int (*send_power_source_msg)(struct i2c_client *i2c, struct sm_dc_power_source_info *ta);
 	int (*check_sw_ocp)(struct i2c_client *i2c);
 };

@@ -25,7 +25,12 @@
 #define __visible_for_testing static
 #endif
 
-make_get_mparam(max77705_fg, lpcharge, unsigned int);
+#if IS_ENABLED(CONFIG_SEC_MPARAM) || (IS_MODULE(CONFIG_SEC_PARAM) && defined(CONFIG_ARCH_EXYNOS))
+extern unsigned int lpcharge;
+#else
+static unsigned int __read_mostly lpcharge;
+module_param(lpcharge, uint, 0444);
+#endif
 
 static enum power_supply_property max77705_fuelgauge_props[] = {
 	POWER_SUPPLY_PROP_ONLINE,
@@ -35,18 +40,23 @@ bool max77705_fg_fuelalert_init(struct max77705_fuelgauge_data *fuelgauge,
 				int soc);
 static void max77705_fg_periodic_read_power(
 				struct max77705_fuelgauge_data *fuelgauge);
+static void max77705_reset_bat_id(struct max77705_fuelgauge_data *fuelgauge);
 
 static struct device_attribute max77705_fg_attrs[] = {
 	MAX77705_FG_ATTR(fg_data),
 };
 
+static unsigned int max77705_get_lpmode(void) { return lpcharge; }
+static int max77705_fg_read_vfsoc(struct max77705_fuelgauge_data *fuelgauge);
+
 #if !defined(CONFIG_SEC_FACTORY)
 static void max77705_fg_adaptation_wa(struct max77705_fuelgauge_data *fuelgauge)
 {
 	u32 rcomp0;
-	u32 fullcapnom;
+	u32 fullcapnom, fullcaprep, designcap;
 	u32 temp;
 	u8 data[2];
+	int vfsoc;
 	struct fg_reset_wa *fg_reset_data = fuelgauge->fg_reset_data;
 
 	if (!fg_reset_data)
@@ -78,22 +88,27 @@ static void max77705_fg_adaptation_wa(struct max77705_fuelgauge_data *fuelgauge)
 		goto set_default_value;
 	}
 
+	/* get DESIGNCAP */
+	designcap = max77705_read_word(fuelgauge->i2c, DESIGNCAP_REG);
+
 	/* check FULLCAPNOM */
 	fullcapnom = max77705_read_word(fuelgauge->i2c, FULLCAP_NOM_REG);
-	temp = max77705_read_word(fuelgauge->i2c, DESIGNCAP_REG);
-	if (fullcapnom > (temp * 11 / 10)) {
-		pr_err("%s: abnormal fullcapnom (0x%x / 0x%x)\n", __func__, fullcapnom, temp);
-		goto re_calculation;
+	if (fullcapnom > (designcap * 11 / 10)) {
+		pr_err("%s: abnormal fullcapnom (0x%x / 0x%x)\n", __func__, fullcapnom, designcap);
+		goto re_calculation_fullcap_nom;
+	}
+
+	/* check FULLCAPREP */
+	fullcaprep = max77705_read_word(fuelgauge->i2c, FULLCAP_REP_REG);
+	if (fullcaprep > (designcap * 115 / 100)) {
+		pr_err("%s: abnormal fullcaprep (0x%x / 0x%x)\n", __func__, fullcaprep, designcap);
+		goto re_calculation_fullcap_rep;
 	}
 
 	return;
 
-set_default_value:
-	pr_err("%s: enter set_default_value\n", __func__);
-	max77705_write_word(fuelgauge->i2c, RCOMP_REG, fg_reset_data->rcomp0);
-	max77705_write_word(fuelgauge->i2c, TEMPCO_REG, fg_reset_data->tempco);
-re_calculation:
-	pr_err("%s: enter re_calculation\n", __func__);
+re_calculation_fullcap_nom:
+	pr_err("%s: enter re_calculation fullcapnom\n", __func__);
 	max77705_write_word(fuelgauge->i2c, DPACC_REG, fg_reset_data->dPacc);
 	max77705_write_word(fuelgauge->i2c, DQACC_REG, fg_reset_data->dQacc);
 	max77705_write_word(fuelgauge->i2c, FULLCAP_NOM_REG, fg_reset_data->fullcapnom);
@@ -101,6 +116,17 @@ re_calculation:
 	temp &= 0xFF0F;
 	max77705_write_word(fuelgauge->i2c, LEARN_CFG_REG, temp);
 	max77705_write_word(fuelgauge->i2c, CYCLES_REG, 0);
+re_calculation_fullcap_rep:
+	pr_err("%s: enter re_calculation fullcaprep\n", __func__);
+	vfsoc = max77705_fg_read_vfsoc(fuelgauge);
+	max77705_write_word(fuelgauge->i2c, REMCAP_REP_REG, vfsoc * fg_reset_data->fullcapnom / 1000);
+	msleep(200);
+	max77705_write_word(fuelgauge->i2c, FULLCAP_REP_REG, fg_reset_data->fullcapnom);
+	fuelgauge->err_cnt++;
+set_default_value:
+	pr_err("%s: enter set_default_value\n", __func__);
+	max77705_write_word(fuelgauge->i2c, RCOMP_REG, fg_reset_data->rcomp0);
+	max77705_write_word(fuelgauge->i2c, TEMPCO_REG, fg_reset_data->tempco);
 
 	return;
 }
@@ -135,7 +161,7 @@ static void max77705_fg_periodic_read(struct max77705_fuelgauge_data *fuelgauge)
 			if (!fuelgauge->skip_fg_verify && fg_verify && v_cnt < fuelgauge->verify_selected_reg_length) {
 				if (fg_verify[v_cnt].addr == reg + i * 0x10) {
 					if (fg_verify[v_cnt].data != data[reg]) {
-						pr_err("%s:[%d] addr(0x%x 0x%x) data(0x%x 0x%x)\n",
+						pr_err("%s:[%d] addr(0x%x 0x%x) data(0x%x 0x%x) read veryfy error! not matched!\n",
 								__func__, v_cnt,
 								fg_verify[v_cnt].addr, reg + i * 0x10,
 								fg_verify[v_cnt].data, data[reg]);
@@ -1098,8 +1124,8 @@ static void max77705_fg_periodic_read_power(
 	vbyp = max77705_get_fuelgauge_value(fuelgauge, FG_VBYP);
 	qh = max77705_get_fuelgauge_value(fuelgauge, FG_QH);
 
-	pr_info("[FG power] ISYS(%dmA),ISYSAVG(%dmA),VSYS(%dmV),IIN(%dmA),VBYP(%dmV) QH(%d uah)\n",
-		isys, isys_avg, vsys, iin, vbyp, qh);
+	pr_info("[FG power] ISYS(%dmA),ISYSAVG(%dmA),VSYS(%dmV),IIN(%dmA),VBYP(%dmV),QH(%d uah),WA(%d)\n",
+		isys, isys_avg, vsys, iin, vbyp, qh, fuelgauge->err_cnt);
 }
 
 static void max77705_fg_read_power_log(
@@ -1196,6 +1222,58 @@ static int max77705_get_fg_soc(struct max77705_fuelgauge_data *fuelgauge)
 	return fg_soc;
 }
 
+static void max77705_offset_leakage(
+				struct max77705_fuelgauge_data *fuelgauge)
+{
+	// offset coffset
+	if (fuelgauge->battery_data->coff_origin) {
+		pr_info("%s: modify coffset\n", __func__);
+		if (fuelgauge->is_charging) {
+			max77705_write_word(fuelgauge->i2c, COFFSET_REG,
+				fuelgauge->battery_data->coff_charging);
+			pr_info("%s: modify coffset 0x%x\n", __func__, fuelgauge->battery_data->coff_charging);
+		} else {
+			max77705_write_word(fuelgauge->i2c, COFFSET_REG,
+				fuelgauge->battery_data->coff_origin);
+			pr_info("%s: modify coffset 0x%x\n", __func__, fuelgauge->battery_data->coff_origin);
+		}
+	}
+
+	// offset cgain
+	if (fuelgauge->battery_data->cgain_origin) {
+		pr_info("%s: modify cgain\n", __func__);
+		if (fuelgauge->is_charging) {
+			max77705_write_word(fuelgauge->i2c, CGAIN_REG,
+				fuelgauge->battery_data->cgain_charging);
+			pr_info("%s: modify cgain 0x%x\n", __func__, fuelgauge->battery_data->cgain_charging);
+		} else {
+			max77705_write_word(fuelgauge->i2c, CGAIN_REG,
+				fuelgauge->battery_data->cgain_origin);
+			pr_info("%s: modify cgain 0x%x\n", __func__, fuelgauge->battery_data->cgain_origin);
+		}
+	}
+}
+
+static void max77705_offset_leakage_default(
+				struct max77705_fuelgauge_data *fuelgauge)
+{
+	// offset coffset
+	if (fuelgauge->battery_data->coff_charging) {
+		pr_info("%s: modify coffset\n", __func__);
+		max77705_write_word(fuelgauge->i2c, COFFSET_REG,
+			fuelgauge->battery_data->coff_charging);
+		pr_info("%s: modify coffset 0x%x\n", __func__, fuelgauge->battery_data->coff_charging);
+	}
+
+	// offset cgain
+	if (fuelgauge->battery_data->cgain_origin) {
+		pr_info("%s: modify cgain\n", __func__);
+		max77705_write_word(fuelgauge->i2c, CGAIN_REG,
+			fuelgauge->battery_data->cgain_origin);
+		pr_info("%s: modify cgain 0x%x\n", __func__, fuelgauge->battery_data->cgain_origin);
+	}
+}
+
 static irqreturn_t max77705_jig_irq_thread(int irq, void *irq_data)
 {
 	struct max77705_fuelgauge_data *fuelgauge = irq_data;
@@ -1286,6 +1364,8 @@ bool max77705_fg_init(struct max77705_fuelgauge_data *fuelgauge)
 		}
 	}
 
+	max77705_offset_leakage(fuelgauge);
+
 	return true;
 }
 
@@ -1320,7 +1400,7 @@ void max77705_fg_fuelalert_set(struct max77705_fuelgauge_data *fuelgauge,
 	if (max77705_bulk_read(fuelgauge->i2c, STATUS_REG, 2, status_data) < 0)
 		pr_err("%s: Failed to read STATUS_REG\n", __func__);
 
-	if ((status_data[1] & 0x01) && !get_mparam(max77705_fg, lpcharge) && !fuelgauge->is_charging) {
+	if ((status_data[1] & 0x01) && !max77705_get_lpmode() && !fuelgauge->is_charging) {
 		pr_info("%s: Battery Voltage is Very Low!! V EMPTY(%d)\n",
 			__func__, fuelgauge->vempty_mode);
 
@@ -1502,17 +1582,13 @@ __visible_for_testing void max77705_lost_soc_check_trigger_cond(
 		fuelgauge->lost_soc.lost_cap += d_remcap;
 
 		/* calc weight */
-		if (d_raw_soc >= fuelgauge->lost_soc.guarantee_soc)
-			fuelgauge->lost_soc.weight += d_raw_soc / fuelgauge->lost_soc.guarantee_soc;
-		else
-			fuelgauge->lost_soc.weight += 1;
+		fuelgauge->lost_soc.weight += d_raw_soc * 10 / fuelgauge->lost_soc.guarantee_soc;
+		if (fuelgauge->lost_soc.weight < fuelgauge->lost_soc.min_weight)
+			fuelgauge->lost_soc.weight = fuelgauge->lost_soc.min_weight;
 
-		if (fuelgauge->lost_soc.weight < 2)
-			fuelgauge->lost_soc.weight = 2;
-
-		pr_info("%s: trigger: (unit:0.1%%) raw_soc(%d->%d), d_raw_soc(%d), d_remcap(%d), d_qh(%d), weight(%d)\n",
-			__func__, fuelgauge->lost_soc.prev_raw_soc, raw_soc,
-			d_raw_soc, d_remcap, d_qh, fuelgauge->lost_soc.weight);
+		pr_info("%s: trigger: raw_soc(%d->%d), d_raw_soc(%d), d_remcap(%d), d_qh(%d), weight(%d.%d)\n",
+			__func__, fuelgauge->lost_soc.prev_raw_soc, raw_soc, d_raw_soc, d_remcap,
+			d_qh, fuelgauge->lost_soc.weight / 10, fuelgauge->lost_soc.weight % 10);
 	}
 }
 
@@ -1539,7 +1615,7 @@ __visible_for_testing int max77705_lost_soc_calc_soc(
 	} else if (d_qh == 0) {
 		gap_cap = 1;
 	} else {
-		gap_cap = (d_qh * fuelgauge->lost_soc.weight);
+		gap_cap = (d_qh * fuelgauge->lost_soc.weight / 10);
 	}
 
 	if ((vavg < fuelgauge->lost_soc.min_vol) && (vavg > 0) && (gap_cap < onecap)) {
@@ -1552,13 +1628,13 @@ __visible_for_testing int max77705_lost_soc_calc_soc(
 
 	if (fuelgauge->lost_soc.lost_cap > 0) {
 		lost_soc = (fuelgauge->lost_soc.lost_cap * 1000) / fullcaprep;
-		pr_info("%s: ing: (unit:0.1%%) calc_soc(%d), lost_soc(%d), lost_cap(%d), d_qh(%d), d_remcap(%d), weight(%d)\n",
+		pr_info("%s: ing: calc_soc(%d), lost_soc(%d), lost_cap(%d), d_qh(%d), d_remcap(%d), weight(%d.%d)\n",
 			__func__, request_soc + lost_soc, lost_soc, fuelgauge->lost_soc.lost_cap,
-			d_qh, d_remcap, fuelgauge->lost_soc.weight);
+			d_qh, d_remcap, fuelgauge->lost_soc.weight / 10, fuelgauge->lost_soc.weight % 10);
 	} else {
 		lost_soc = 0;
 		max77705_lost_soc_reset(fuelgauge);
-		pr_info("%s: done: (unit:0.1%%) request_soc(%d), lost_soc(%d), lost_cap(%d)\n",
+		pr_info("%s: done: request_soc(%d), lost_soc(%d), lost_cap(%d)\n",
 			__func__, request_soc, lost_soc, fuelgauge->lost_soc.lost_cap);
 	}
 
@@ -1654,7 +1730,7 @@ static unsigned int max77705_check_vempty_status(struct max77705_fuelgauge_data 
 		fuelgauge->vempty_time = 0;
 	}
 
-	if (!fuelgauge->is_charging && !get_mparam(max77705_fg, lpcharge) &&
+	if (!fuelgauge->is_charging && !max77705_get_lpmode() &&
 		fuelgauge->vempty_mode == VEMPTY_MODE_SW_VALERT) {
 		if (!fuelgauge->vempty_time) {
 			pr_info("%s : SW V EMPTY. Decrease SOC\n", __func__);
@@ -2068,11 +2144,20 @@ static int max77705_fg_get_property(struct power_supply *psy,
 			val->intval = fuelgauge->is_charging;
 			break;
 		case POWER_SUPPLY_EXT_PROP_BATTERY_ID:
-			if (!val->intval)
+			if (!val->intval) {
+				if (fuelgauge->pdata->bat_gpio_cnt > 0)
+					max77705_reset_bat_id(fuelgauge);
 				val->intval = fuelgauge->battery_data->battery_id;
+				pr_info("%s: bat_id_gpio = %d \n", __func__, val->intval);
+			}
 #if IS_ENABLED(CONFIG_DUAL_BATTERY)
-			else if (val->intval == SEC_DUAL_BATTERY_SUB)
-				val->intval = fuelgauge->battery_data->sub_battery_id;
+			else if (val->intval == SEC_DUAL_BATTERY_SUB) {
+				if (fuelgauge->pdata->sub_bat_id_gpio >= 0)
+					val->intval = gpio_get_value(fuelgauge->pdata->sub_bat_id_gpio);
+				else
+					val->intval = fuelgauge->battery_data->sub_battery_id;
+				pr_info("%s: sub_bat_id_gpio = %d \n", __func__, val->intval);
+			}
 #endif
 			break;
 		default:
@@ -2217,9 +2302,11 @@ static int max77705_fg_set_property(struct power_supply *psy,
 			case SEC_BAT_CHG_MODE_BUCK_OFF:
 			case SEC_BAT_CHG_MODE_CHARGING_OFF:
 				fuelgauge->is_charging = false;
+				max77705_offset_leakage(fuelgauge);
 				break;
 			case SEC_BAT_CHG_MODE_CHARGING:
 				fuelgauge->is_charging = true;
+				max77705_offset_leakage(fuelgauge);
 				break;
 			};
 			break;
@@ -2299,10 +2386,38 @@ static void max77705_fuelgauge_parse_dt_lost_soc(
 	if (ret < 0)
 		fuelgauge->lost_soc.min_vol = 3200; /* 3.2V */
 
-	pr_info("%s: trigger soc(%d), d_soc(%d), scale(%d), guarantee_soc(%d), min_vol(%d)\n",
+	ret = of_property_read_u32(np, "fuelgauge,lost_soc_min_weight",
+				 &fuelgauge->lost_soc.min_weight);
+	if (ret < 0 || fuelgauge->lost_soc.min_weight <= 10)
+		fuelgauge->lost_soc.min_weight = 20; /* 2.0 */
+
+	pr_info("%s: trigger soc(%d), d_soc(%d), scale(%d), guarantee_soc(%d), min_vol(%d), min_weight(%d)\n",
 		__func__, fuelgauge->lost_soc.trig_soc, fuelgauge->lost_soc.trig_d_soc,
 		fuelgauge->lost_soc.trig_scale, fuelgauge->lost_soc.guarantee_soc,
-		fuelgauge->lost_soc.min_vol);
+		fuelgauge->lost_soc.min_vol, fuelgauge->lost_soc.min_weight);
+}
+
+__visible_for_testing int max77705_get_bat_id(int bat_id[], int bat_gpio_cnt)
+{
+	int battery_id = 0;
+	int i = 0;
+
+	for (i = (bat_gpio_cnt - 1); i >= 0; i--)
+		battery_id += bat_id[i] << i;
+
+	return battery_id;
+}
+
+static void max77705_reset_bat_id(struct max77705_fuelgauge_data *fuelgauge)
+{
+	int bat_id[BAT_GPIO_NO] = {0, };
+	int i = 0;
+
+	for (i = 0; i < fuelgauge->pdata->bat_gpio_cnt; i++)
+		bat_id[i] = gpio_get_value(fuelgauge->pdata->bat_id_gpio[i]);
+
+	fuelgauge->battery_data->battery_id =
+			max77705_get_bat_id(bat_id, fuelgauge->pdata->bat_gpio_cnt);
 }
 
 static int max77705_fuelgauge_parse_dt(struct max77705_fuelgauge_data *fuelgauge)
@@ -2311,6 +2426,8 @@ static int max77705_fuelgauge_parse_dt(struct max77705_fuelgauge_data *fuelgauge
 	max77705_fuelgauge_platform_data_t *pdata = fuelgauge->pdata;
 	int ret, len;
 	u8 battery_id = 0;
+	int i = 0;
+	int bat_id[BAT_GPIO_NO] = {0, };
 	const u32 *p;
 
 	/* reset, irq gpio info */
@@ -2447,17 +2564,30 @@ static int max77705_fuelgauge_parse_dt(struct max77705_fuelgauge_data *fuelgauge
 			pr_err("%s: error reading fullsocthr_2nd %d\n", __func__, ret);
 #endif
 
-		pdata->bat_id_gpio = of_get_named_gpio(np, "fuelgauge,bat_id_gpio", 0);
-		if (pdata->bat_id_gpio >= 0) {
-			/* 0: BAT_ID LOW, 1: BAT_ID OPEN */
-			battery_id = gpio_get_value(pdata->bat_id_gpio);
-		} else {
-			pr_err("%s: error reading bat_id_gpio = %d\n",
-				__func__, pdata->bat_id_gpio);
-			battery_id = 0;
-		}
+		pdata->bat_gpio_cnt = of_gpio_named_count(np, "fuelgauge,bat_id_gpio");
+		/* not run if gpio gpio cnt is less than 1 */
+		if (pdata->bat_gpio_cnt > 0) {
+			pr_info("%s: Has %d bat_id_gpios\n", __func__, pdata->bat_gpio_cnt);
+			if (pdata->bat_gpio_cnt > BAT_GPIO_NO) {
+				pr_err("%s: bat_id_gpio, catch out-of bounds array read\n",
+						__func__);
+				pdata->bat_gpio_cnt = BAT_GPIO_NO;
+			}
+			for (i = 0; i < pdata->bat_gpio_cnt; i++) {
+				pdata->bat_id_gpio[i] = of_get_named_gpio(np, "fuelgauge,bat_id_gpio", i);
+				if (pdata->bat_id_gpio[i] >= 0) {
+					bat_id[i] = gpio_get_value(pdata->bat_id_gpio[i]);
+				} else {
+					pr_err("%s: error reading bat_id_gpio = %d\n",
+						__func__, pdata->bat_id_gpio[i]);
+					bat_id[i] = 0;
+				}
+			}
+			fuelgauge->battery_data->battery_id =
+					max77705_get_bat_id(bat_id, pdata->bat_gpio_cnt);
+		} else
+			fuelgauge->battery_data->battery_id = 0;
 
-		fuelgauge->battery_data->battery_id = battery_id;
 		pr_info("%s: battery_id = %d\n", __func__, fuelgauge->battery_data->battery_id);
 
 #if IS_ENABLED(CONFIG_DUAL_BATTERY)
@@ -2474,7 +2604,6 @@ static int max77705_fuelgauge_parse_dt(struct max77705_fuelgauge_data *fuelgauge
 		fuelgauge->battery_data->sub_battery_id = battery_id;
 		pr_info("%s: sub_battery_id = %d\n", __func__, fuelgauge->battery_data->sub_battery_id);
 #endif
-
 		if (fuelgauge->pdata->capacity_calculation_type &
 			SEC_FUELGAUGE_CAPACITY_TYPE_LOST_SOC)
 			max77705_fuelgauge_parse_dt_lost_soc(fuelgauge, np);
@@ -2491,8 +2620,18 @@ static int max77705_fuelgauge_parse_dt(struct max77705_fuelgauge_data *fuelgauge
 				battery_id, "v_empty");
 			ret = of_property_read_u32(np, prop_name,
 				&fuelgauge->battery_data->V_empty);
-			if (ret < 0)
+			if (ret < 0) {
 				pr_err("%s: error reading v_empty %d\n", __func__, ret);
+				pr_err("%s: battery data: %d does not exist\n", __func__, battery_id);
+				battery_id =  0;
+				snprintf(prop_name, PROPERTY_NAME_SIZE, "battery%d,%s",
+					battery_id, "v_empty");
+				ret = of_property_read_u32(np, prop_name,
+					&fuelgauge->battery_data->V_empty);
+				if (ret < 0)
+					pr_err("%s: error reading v_empty of default battery data %d\n",
+						__func__, ret);
+			}
 
 			snprintf(prop_name, PROPERTY_NAME_SIZE, "battery%d,%s",
 				battery_id, "v_empty_origin");
@@ -2527,9 +2666,6 @@ static int max77705_fuelgauge_parse_dt(struct max77705_fuelgauge_data *fuelgauge
 					fuelgauge->fg_reset_data = NULL;
 				}
 			}
-			pr_info("%s: V_empty(0x%04x), v_empty_origin(0x%04x), capacity(0x%04x)\n",
-				__func__, fuelgauge->battery_data->V_empty,
-				fuelgauge->battery_data->V_empty_origin, fuelgauge->battery_data->Capacity);
 
 			snprintf(prop_name, PROPERTY_NAME_SIZE, "battery%d,%s",
 				battery_id, "data_ver");
@@ -2562,6 +2698,41 @@ static int max77705_fuelgauge_parse_dt(struct max77705_fuelgauge_data *fuelgauge
 				pr_err("%s: there is not selected_reg\n", __func__);
 				fuelgauge->verify_selected_reg = NULL;
 			}
+
+			snprintf(prop_name, PROPERTY_NAME_SIZE, "battery%d,%s",
+					battery_id, "coff_origin");
+			ret = of_property_read_u32(np, prop_name,
+							&fuelgauge->battery_data->coff_origin);
+			if (ret < 0)
+				pr_err("%s: error reading coff_origin %d\n", __func__, ret);
+
+			snprintf(prop_name, PROPERTY_NAME_SIZE, "battery%d,%s",
+					battery_id, "coff_charging");
+			ret = of_property_read_u32(np, prop_name,
+							&fuelgauge->battery_data->coff_charging);
+			if (ret < 0)
+				pr_err("%s: error reading coff_charging %d\n", __func__, ret);
+
+			snprintf(prop_name, PROPERTY_NAME_SIZE, "battery%d,%s",
+					battery_id, "cgain_origin");
+			ret = of_property_read_u32(np, prop_name,
+							&fuelgauge->battery_data->cgain_origin);
+			if (ret < 0)
+				pr_err("%s: error reading cgain_origin %d\n", __func__, ret);
+
+			snprintf(prop_name, PROPERTY_NAME_SIZE, "battery%d,%s",
+					battery_id, "cgain_charging");
+			ret = of_property_read_u32(np, prop_name,
+							&fuelgauge->battery_data->cgain_charging);
+			if (ret < 0)
+				pr_err("%s: error reading cgain_charging %d\n", __func__, ret);
+
+			pr_info("%s: V_empty(0x%04x), v_empty_origin(0x%04x), capacity(0x%04x),"
+					"coff_origin(0x%04x), coff_charging(0x%04x),"
+					"cgain_origin(0x%04x), cgain_charging(0x%04x)\n",
+				__func__, fuelgauge->battery_data->V_empty, fuelgauge->battery_data->V_empty_origin, fuelgauge->battery_data->Capacity,
+				fuelgauge->battery_data->coff_origin, fuelgauge->battery_data->coff_charging,
+				fuelgauge->battery_data->cgain_origin, fuelgauge->battery_data->cgain_charging);
 		}
 
 		np = of_find_node_by_name(NULL, "battery");
@@ -2570,12 +2741,6 @@ static int max77705_fuelgauge_parse_dt(struct max77705_fuelgauge_data *fuelgauge
 		if (ret < 0)
 			pr_err("%s: error reading pdata->thermal_source %d\n",
 				__func__, ret);
-
-		np = of_find_node_by_name(NULL, "cable-info");
-		ret = of_property_read_u32(np, "full_check_current_1st",
-					 &pdata->full_check_current_1st);
-		ret = of_property_read_u32(np, "full_check_current_2nd",
-					 &pdata->full_check_current_2nd);
 
 #if defined(CONFIG_BATTERY_AGE_FORECAST)
 		ret = of_property_read_u32(np, "battery,full_condition_soc",
@@ -2652,8 +2817,6 @@ static int max77705_fuelgauge_probe(struct platform_device *pdev)
 		pr_err("%s not found fg dt! ret[%d]\n", __func__, ret);
 #endif
 
-	platform_set_drvdata(pdev, fuelgauge);
-
 	fuelgauge->capacity_max = fuelgauge->pdata->capacity_max;
 	fuelgauge->g_capacity_max = 0;
 	fuelgauge->capacity_max_conv = false;
@@ -2666,6 +2829,7 @@ static int max77705_fuelgauge_probe(struct platform_device *pdev)
 
 	if (!max77705_fg_init(fuelgauge)) {
 		pr_err("%s: Failed to Initialize Fuelgauge\n", __func__);
+		ret = -ENODEV;
 		goto err_data_free;
 	}
 
@@ -2719,11 +2883,14 @@ static int max77705_fuelgauge_probe(struct platform_device *pdev)
 		goto err_irq;
 	}
 
+	fuelgauge->err_cnt = 0;
 	fuelgauge->sleep_initial_update_of_soc = false;
 	fuelgauge->initial_update_of_soc = true;
 #if defined(CONFIG_BATTERY_CISD)
 	fuelgauge->valert_count_flag = false;
 #endif
+	platform_set_drvdata(pdev, fuelgauge);
+
 	pr_info("%s: max77705 Fuelgauge Driver Loaded\n", __func__);
 	return 0;
 
@@ -2751,17 +2918,19 @@ static int max77705_fuelgauge_remove(struct platform_device *pdev)
 
 	pr_info("%s: ++\n", __func__);
 
-	if (fuelgauge->psy_fg)
-		power_supply_unregister(fuelgauge->psy_fg);
+	if (fuelgauge) {
+		if (fuelgauge->psy_fg)
+			power_supply_unregister(fuelgauge->psy_fg);
 
-	free_irq(fuelgauge->fg_irq, fuelgauge);
-	wakeup_source_unregister(fuelgauge->fuel_alert_ws);
+		free_irq(fuelgauge->fg_irq, fuelgauge);
+		wakeup_source_unregister(fuelgauge->fuel_alert_ws);
 #if defined(CONFIG_OF)
-	kfree(fuelgauge->battery_data);
+		kfree(fuelgauge->battery_data);
 #endif
-	kfree(fuelgauge->pdata);
-	mutex_destroy(&fuelgauge->fg_lock);
-	kfree(fuelgauge);
+		kfree(fuelgauge->pdata);
+		mutex_destroy(&fuelgauge->fg_lock);
+		kfree(fuelgauge);
+	}
 
 	pr_info("%s: --\n", __func__);
 
@@ -2788,11 +2957,17 @@ static void max77705_fuelgauge_shutdown(struct platform_device *pdev)
 
 	pr_info("%s: ++\n", __func__);
 
-	free_irq(fuelgauge->fg_irq, fuelgauge);
-	if (fuelgauge->pdata->jig_gpio)
-		free_irq(fuelgauge->pdata->jig_irq, fuelgauge);
+	if (fuelgauge) {
+		if (fuelgauge->i2c) {
+			max77705_offset_leakage_default(fuelgauge);
+		}
+		if (fuelgauge->fg_irq)
+			free_irq(fuelgauge->fg_irq, fuelgauge);
+		if (fuelgauge->pdata->jig_gpio)
+			free_irq(fuelgauge->pdata->jig_irq, fuelgauge);
 
-	cancel_delayed_work(&fuelgauge->isr_work);
+		cancel_delayed_work(&fuelgauge->isr_work);
+	}
 
 	pr_info("%s: --\n", __func__);
 }

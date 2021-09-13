@@ -182,6 +182,7 @@ enum sec_wireless_vout_control_mode {
 	WIRELESS_VOUT_5_5V_STEP, /* 13 */
 	WIRELESS_VOUT_9V_STEP, /* 14 */
 	WIRELESS_VOUT_10V_STEP, /* 15 */
+	WIRELESS_VOUT_4_5V_STEP, /* 16 */
 };
 
 enum sec_wireless_rx_control_mode {

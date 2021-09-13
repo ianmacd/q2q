@@ -119,6 +119,9 @@ static int32_t cam_actuator_power_up(struct cam_actuator_ctrl_t *a_ctrl)
 
 	power_info->dev = soc_info->dev;
 
+	CAM_INFO(CAM_ACTUATOR, "actuator[%d] powerup",
+		a_ctrl->soc_info.index);
+
 	rc = cam_sensor_core_power_up(power_info, soc_info);
 	if (rc) {
 		CAM_ERR(CAM_ACTUATOR,
@@ -131,6 +134,9 @@ static int32_t cam_actuator_power_up(struct cam_actuator_ctrl_t *a_ctrl)
 		CAM_ERR(CAM_ACTUATOR, "cci init failed: rc: %d", rc);
 		goto cci_failure;
 	}
+
+	CAM_INFO(CAM_ACTUATOR, "actuator[%d] cci init done",
+		a_ctrl->soc_info.index);
 
 	return rc;
 cci_failure:
@@ -608,6 +614,9 @@ int32_t cam_actuator_i2c_pkt_parse(struct cam_actuator_ctrl_t *a_ctrl,
 		offset += (csl_packet->cmd_buf_offset / sizeof(uint32_t));
 		cmd_desc = (struct cam_cmd_buf_desc *)(offset);
 
+		CAM_INFO(CAM_ACTUATOR, "actuator[%d] init",
+			a_ctrl->soc_info.index);
+
 		/* Loop through multiple command buffers */
 		for (i = 0; i < csl_packet->num_cmd_buf; i++) {
 			total_cmd_buf_in_bytes = cmd_desc[i].length;
@@ -702,6 +711,9 @@ int32_t cam_actuator_i2c_pkt_parse(struct cam_actuator_ctrl_t *a_ctrl,
 		if (rc < 0) {
 			CAM_ERR(CAM_ACTUATOR, "Cannot apply Init settings");
 			goto end;
+		} else {
+			CAM_INFO(CAM_ACTUATOR, "actuator[%d] init done",
+				a_ctrl->soc_info.index);
 		}
 
 		/* Delete the request even if the apply is failed */
