@@ -3733,11 +3733,7 @@ static void cw_check_pd_wire_type(struct sec_battery_info *battery)
 	if (is_pd_wire_type(battery->wire_status)) {
 		sec_bat_get_input_current_in_power_list(battery);
 		sec_bat_get_charging_current_in_power_list(battery);
-		if (battery->sink_status.selected_pdo_num ==
-			battery->sink_status.current_pdo_num) {
-			sec_bat_set_current_event(battery, 0, SEC_BAT_CURRENT_EVENT_SELECT_PDO);
-			sec_vote(battery->input_vote, VOTER_SELECT_PDO, false, 0);
-		}
+
 #if defined(CONFIG_STEP_CHARGING)
 #if IS_ENABLED(CONFIG_DIRECT_CHARGING)
 		if (!is_pd_apdo_wire_type(battery->cable_type)) {
@@ -5990,6 +5986,13 @@ static int usb_typec_handle_id_power_status(struct sec_battery_info *battery,
 			battery->hv_pdo = false;
 
 		battery->pdic_ps_rdy = true;
+		sec_bat_get_input_current_in_power_list(battery);
+		sec_bat_get_charging_current_in_power_list(battery);
+		if (battery->sink_status.selected_pdo_num ==
+			battery->sink_status.current_pdo_num) {
+			sec_bat_set_current_event(battery, 0, SEC_BAT_CURRENT_EVENT_SELECT_PDO);
+			sec_vote(battery->input_vote, VOTER_SELECT_PDO, false, 0);
+		}
 		dev_info(battery->dev, "%s: battery->pdic_ps_rdy(%d), hv_pdo(%d)\n",
 			__func__, battery->pdic_ps_rdy, battery->hv_pdo);
 	}

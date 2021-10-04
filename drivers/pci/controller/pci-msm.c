@@ -1456,6 +1456,7 @@ static struct l1ss_ctrl l1ss_ctrls[L1SS_MAX] = {
 	{L1SS_AUDIO,	BIT(L1SS_AUDIO),	"AUDIO",	0, },
 };
 struct workqueue_struct *l1ss_ctrl_wq;
+static int sec_pcie_enable_ep_l1(struct pci_dev *pdev, void *data);
 #endif
 
 #define MSM_PCIE_PARF_REG_DUMP (11)
@@ -7880,8 +7881,8 @@ void msm_pcie_allow_l1(struct pci_dev *pci_dev)
 	struct pci_dev *root_pci_dev;
 	struct msm_pcie_dev_t *pcie_dev;
 #ifdef CONFIG_SEC_PCIE_L1SS
-	int skip_ep_config = 0;
-	u32 ltssm;
+	u32 ltssm, val = ~0;
+	struct pci_dev *ep_pci_dev = NULL;
 #endif
 
 	root_pci_dev = pci_find_pcie_root_port(pci_dev);
@@ -7919,25 +7920,26 @@ void msm_pcie_allow_l1(struct pci_dev *pci_dev)
 #ifdef CONFIG_SEC_PCIE_L1SS
 	ltssm = readl_relaxed(pcie_dev->parf + PCIE20_PARF_LTSSM) & MSM_PCIE_LTSSM_MASK;
 	if ((ltssm != MSM_PCIE_LTSSM_L0) && (ltssm != MSM_PCIE_LTSSM_L0S)) {
-			skip_ep_config = 1;
 			PCIE_INFO(pcie_dev, "PCIe RC%d: LTSSM_STATE: %s\n",
 				pcie_dev->rc_idx, TO_LTSSM_STR(ltssm));
+	} else {
+		if (!list_empty(&root_pci_dev->subordinate->devices))
+			ep_pci_dev = list_entry(root_pci_dev->subordinate->devices.next,
+					struct pci_dev, bus_list);
+		if (ep_pci_dev) {
+			pci_read_config_dword(ep_pci_dev,
+				ep_pci_dev->pcie_cap + PCI_EXP_LNKCTL, &val);
+		}
 	}
 #endif
 	msm_pcie_write_mask(pcie_dev->parf + PCIE20_PARF_PM_CTRL, BIT(5), 0);
 	/* enable L1 */
-#ifdef CONFIG_SEC_PCIE_L1SS
-	if (skip_ep_config) {
-		msm_pcie_write_mask(pcie_dev->dm_core +
-				(root_pci_dev->pcie_cap + PCI_EXP_LNKCTL),
-				0, PCI_EXP_LNKCTL_ASPM_L1);
-	} else {
-		msm_pcie_config_l1_enable_all(pcie_dev);
-	}
-#else
 	msm_pcie_write_mask(pcie_dev->dm_core +
 				(root_pci_dev->pcie_cap + PCI_EXP_LNKCTL),
 				0, PCI_EXP_LNKCTL_ASPM_L1);
+#ifdef CONFIG_SEC_PCIE_L1SS
+	if (!(val & PCI_EXP_LNKCTL_ASPM_L1))
+		sec_pcie_enable_ep_l1(ep_pci_dev, pcie_dev);
 #endif
 	PCIE_DBG2(pcie_dev, "[%d] PCIe: RC%d: %02x:%02x.%01x: exit\n",
 		current->pid, pcie_dev->rc_idx, pci_dev->bus->number,
@@ -8317,6 +8319,28 @@ static bool sec_pcie_check_ep_driver_up(struct msm_pcie_dev_t *dev)
 	return dev->use_ep_loaded ? dev->ep_loaded : true;
 }
 
+static int sec_pcie_enable_ep_l1(struct pci_dev *pdev, void *data)
+{
+	struct msm_pcie_dev_t *dev = data;
+
+	if (pdev->subordinate || !pdev->bus->parent) {
+		PCIE_INFO(dev, "PCIe: RC%d: PCI device %02x:%02x.%01x is not EP\n",
+				dev->rc_idx, pdev->bus->number, PCI_SLOT(pdev->devfn),
+				PCI_FUNC(pdev->devfn));
+		return -ENODEV;
+	}
+
+	msm_pcie_config_clear_set_dword(pdev,
+			pdev->pcie_cap + PCI_EXP_LNKCTL, 0,
+			PCI_EXP_LNKCTL_ASPM_L1);
+
+	PCIE_DBG2(dev, "PCIe: RC%d: PCI device %02x:%02x.%01x L1 enabled\n",
+			dev->rc_idx, pdev->bus->number, PCI_SLOT(pdev->devfn),
+			PCI_FUNC(pdev->devfn));
+
+	return 0;
+}
+
 static ssize_t sec_show_l1ss_stat(struct device *in_dev,
 				struct device_attribute *attr, char *buf)
 {
@@ -8325,69 +8349,91 @@ static ssize_t sec_show_l1ss_stat(struct device *in_dev,
 	unsigned long irqsave_flags;
 	bool l1_1_cap_support, l1_2_cap_support;
 	u32 val;
-	u32 l1ss_cap_id_offset, l1ss_cap_offset, l1ss_ctl1_offset;
+	u32 l1ss_cap_id_offset, l1ss_cap_offset;
+	u32 l1ss_ctl1_offset, l1ss_ctl2_offset, l1ss_ltr_cap_id_offset;
 	int count = 0;
+	u32 ltssm;
 
 	mutex_lock(&dev->setup_lock);
 	spin_lock_irqsave(&dev->irq_lock, irqsave_flags);
 
 	if (!sec_pcie_check_ep_driver_up(dev)) {
-		count += scnprintf(buf + count, PAGE_SIZE,
+		count += scnprintf(buf + count, PAGE_SIZE - count,
 				"RC%d: EP driver is not up.\n", dev->rc_idx);
 		goto out;
 	}
 
 	if (dev->link_status != MSM_PCIE_LINK_ENABLED) {
-		count += scnprintf(buf + count, PAGE_SIZE,
+		count += scnprintf(buf + count, PAGE_SIZE - count,
 				"RC%d link is not enabled.\n", dev->rc_idx);
 		goto out;
 	}
 
 	if (dev->suspending) {
-		count += scnprintf(buf + count, PAGE_SIZE,
+		count += scnprintf(buf + count, PAGE_SIZE - count,
 				"RC%d is suspending.\n", dev->rc_idx);
 		goto out;
 	}
 
+	ltssm = readl_relaxed(dev->parf + PCIE20_PARF_LTSSM) & MSM_PCIE_LTSSM_MASK;
+	count += scnprintf(buf + count, PAGE_SIZE - count,
+			"LTSSM : %s\n", TO_LTSSM_STR(ltssm));
+
 	while (pdev) {
-		count += scnprintf(buf + count,  PAGE_SIZE,
+		count += scnprintf(buf + count,  PAGE_SIZE - count,
 				"%s\n", dev_name(&pdev->dev));
 
 		pci_read_config_dword(pdev, pdev->pcie_cap + PCI_EXP_LNKCAP, &val);
 
 		if (!(val & BIT(11))) {
-			count += scnprintf(buf + count, PAGE_SIZE,
+			count += scnprintf(buf + count, PAGE_SIZE - count,
 					"\tnot support L1\n");
 			goto out;
 		}
 		
 		pci_read_config_dword(pdev, pdev->pcie_cap + PCI_EXP_LNKCTL, &val);
-		count += scnprintf(buf + count, PAGE_SIZE,
+		count += scnprintf(buf + count, PAGE_SIZE - count,
 				"\tL1 %s\n",val & PCI_EXP_LNKCTL_ASPM_L1 ? "E" : "D");
 
 		l1ss_cap_id_offset = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_L1SS);
 		if (!l1ss_cap_id_offset) {
-			count += scnprintf(buf + count, PAGE_SIZE,
+			count += scnprintf(buf + count, PAGE_SIZE - count,
 				"\tnot found L1ss capability register\n");
 			goto out;
 		}
 
 		l1ss_cap_offset = l1ss_cap_id_offset + PCI_L1SS_CAP;
 		l1ss_ctl1_offset = l1ss_cap_id_offset + PCI_L1SS_CTL1;
+		l1ss_ctl2_offset = l1ss_cap_id_offset + PCI_L1SS_CTL2;
 
 		pci_read_config_dword(pdev, l1ss_cap_offset, &val);
 		l1_1_cap_support = !!(val & (PCI_L1SS_CAP_ASPM_L1_1));
 		l1_2_cap_support = !!(val & (PCI_L1SS_CAP_ASPM_L1_2));
 		if (!l1_1_cap_support && !l1_2_cap_support) {
-			count += scnprintf(buf + count, PAGE_SIZE,
+			count += scnprintf(buf + count, PAGE_SIZE - count,
 				"\tnot support L1ss\n");
 			goto out;
 		}
 
 		pci_read_config_dword(pdev, l1ss_ctl1_offset, &val);
-		count += scnprintf(buf + count, PAGE_SIZE,
-				"\tL1ss %s (L1SS_CTL1:0x%08x)\n",
-				(val & 0xf) == 0xf ? "E" : "D", val);
+		count += scnprintf(buf + count, PAGE_SIZE - count,
+						"\tL1ss %s (L1SS_CTL1:0x%08x)\n",
+						(val & 0xf) == 0xf ? "E" : "D", val);
+		pci_read_config_dword(pdev, l1ss_ctl2_offset, &val);
+		count += scnprintf(buf + count, PAGE_SIZE - count,
+						"\t        (L1SS_CTL2:0x%08x)\n", val);
+		pci_read_config_dword(pdev, pdev->pcie_cap + PCI_EXP_DEVCTL2, &val);
+		count += scnprintf(buf + count, PAGE_SIZE - count,
+						"\t        (DEV_CTL2:0x%08x)\n", val);
+		
+		l1ss_ltr_cap_id_offset = pci_find_ext_capability(pdev, PCI_EXT_CAP_ID_LTR);
+		if (l1ss_ltr_cap_id_offset) {
+			pci_read_config_dword(pdev,
+				l1ss_ltr_cap_id_offset + PCI_LTR_MAX_SNOOP_LAT, &val);
+			count += scnprintf(buf + count, PAGE_SIZE - count,
+						"\t        (LTR_MAX_SNOOP_LAT:0x%08x)\n", val);
+		}
+
 		if (pdev->subordinate)
 			pdev = list_entry(pdev->subordinate->devices.next,
 					struct pci_dev, bus_list);
