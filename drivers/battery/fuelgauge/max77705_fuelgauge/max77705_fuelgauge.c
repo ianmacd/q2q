@@ -1226,7 +1226,7 @@ static void max77705_offset_leakage(
 				struct max77705_fuelgauge_data *fuelgauge)
 {
 	// offset coffset
-	if (fuelgauge->battery_data->coff_origin) {
+	if (fuelgauge->battery_data->coff_origin != fuelgauge->battery_data->coff_charging) {
 		pr_info("%s: modify coffset\n", __func__);
 		if (fuelgauge->is_charging) {
 			max77705_write_word(fuelgauge->i2c, COFFSET_REG,
@@ -1569,7 +1569,7 @@ __visible_for_testing void max77705_lost_soc_check_trigger_cond(
 	struct max77705_fuelgauge_data *fuelgauge, int raw_soc, int d_raw_soc, int d_remcap, int d_qh)
 {
 	if (fuelgauge->lost_soc.prev_raw_soc >= fuelgauge->lost_soc.trig_soc ||
-		d_raw_soc <= 0 || d_qh <= 0)
+		d_raw_soc <= 0 || d_qh < 0)
 		return;
 
 	/*
@@ -1710,7 +1710,7 @@ static unsigned int max77705_check_vempty_status(struct max77705_fuelgauge_data 
 {
 	/* SW/HW V Empty setting */
 	if (fuelgauge->using_hw_vempty && fuelgauge->vempty_init_flag) {
-		if (fuelgauge->temperature <= (int)fuelgauge->low_temp_limit) {
+		if (fuelgauge->temperature <= (int)fuelgauge->low_temp_limit) { /* at low temperature (under 10'C) */
 			if (fuelgauge->raw_capacity <= 50 &&
 				(fuelgauge->vempty_mode != VEMPTY_MODE_HW) &&
 				max77705_fg_check_vempty_recover_time(fuelgauge)) {
@@ -1721,10 +1721,25 @@ static unsigned int max77705_check_vempty_status(struct max77705_fuelgauge_data 
 				max77705_fg_set_vempty(fuelgauge, VEMPTY_MODE_SW);
 				fuelgauge->vempty_time = 0;
 			}
-		} else if (fuelgauge->vempty_mode != VEMPTY_MODE_HW &&
-			max77705_fg_check_vempty_recover_time(fuelgauge)) {
-			max77705_fg_set_vempty(fuelgauge, VEMPTY_MODE_HW);
-			fuelgauge->vempty_time = 0;
+		} else { /* at room temperature (over 10'C) */
+			if (fuelgauge->using_room_temperature_vempty) {
+				if (fuelgauge->raw_capacity <= 500 &&
+					(fuelgauge->vempty_mode != VEMPTY_MODE_HW) &&
+					max77705_fg_check_vempty_recover_time(fuelgauge)) {
+					max77705_fg_set_vempty(fuelgauge, VEMPTY_MODE_HW);
+					fuelgauge->vempty_time = 0;
+				} else if (fuelgauge->raw_capacity > 500 &&
+					fuelgauge->vempty_mode == VEMPTY_MODE_HW) {
+					max77705_fg_set_vempty(fuelgauge, VEMPTY_MODE_SW);
+					fuelgauge->vempty_time = 0;
+				}
+			} else {
+				if (fuelgauge->vempty_mode != VEMPTY_MODE_HW &&
+					max77705_fg_check_vempty_recover_time(fuelgauge)) {
+					max77705_fg_set_vempty(fuelgauge, VEMPTY_MODE_HW);
+					fuelgauge->vempty_time = 0;
+				}
+			}
 		}
 	} else {
 		fuelgauge->vempty_time = 0;
@@ -2510,9 +2525,11 @@ static int max77705_fuelgauge_parse_dt(struct max77705_fuelgauge_data *fuelgauge
 				pr_err("%s: error reading sw_v_empty_recover_vol %d\n",
 					__func__, ret);
 
-			pr_info("%s : SW V Empty (%d)mV,  SW V Empty recover (%d)mV\n",
+			fuelgauge->using_room_temperature_vempty = of_property_read_bool(np,
+				"fuelgauge,using_room_temperature_vempty");
+			pr_info("%s : SW V Empty (%d)mV,  SW V Empty recover (%d)mV, room(%d)\n",
 				__func__, fuelgauge->battery_data->sw_v_empty_vol,
-				fuelgauge->battery_data->sw_v_empty_recover_vol);
+				fuelgauge->battery_data->sw_v_empty_recover_vol, fuelgauge->using_room_temperature_vempty);
 		}
 
 		pdata->jig_gpio = of_get_named_gpio(np, "fuelgauge,jig_gpio", 0);

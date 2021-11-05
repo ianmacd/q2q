@@ -5162,6 +5162,76 @@ error:
 	enable_irq(ts->irq);
 }
 
+static void run_polarity_test(void *device_data)
+{
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
+	struct stm_ts_data *ts = container_of(sec, struct stm_ts_data, sec);
+	char buff[SEC_CMD_STR_LEN];
+	u8 reg;
+	u8 data[STM_TS_EVENT_BUFF_SIZE];
+	int rc, retry = 0;
+
+	sec_cmd_set_default_result(sec);
+
+	ts->stm_ts_systemreset(ts, 0);
+
+	mutex_lock(&ts->fn_mutex);
+	disable_irq(ts->irq);
+
+	reg = STM_TS_CMD_RUN_POLARITY_TEST;
+	rc = ts->stm_ts_spi_write(ts, &reg, 1, NULL, 0);
+	if (rc < 0) {
+		input_err(true, &ts->client->dev, "%s: failed to write cmd\n", __func__);
+		goto error;
+	}
+
+	sec_delay(300);
+
+	memset(data, 0x0, STM_TS_EVENT_BUFF_SIZE);
+	rc = -EIO;
+	reg = STM_TS_READ_ONE_EVENT;
+	while (ts->stm_ts_spi_read(ts, &reg, 1, data, STM_TS_EVENT_BUFF_SIZE) >= 0) {
+		input_info(true, &ts->client->dev,
+				"%s: %02X, %02X, %02X, %02X, %02X, %02X, %02X, %02X\n",
+				__func__, data[0], data[1], data[2], data[3],
+				data[4], data[5], data[6], data[7]);
+
+		if (data[0] == STM_TS_EVENT_PASS_REPORT) {
+			rc = 0; /* PASS */
+			break;
+		} else if (data[0] == STM_TS_EVENT_ERROR_REPORT) {
+			rc = 1; /* FAIL */
+			break;
+		}
+
+		if (retry++ > STM_TS_RETRY_COUNT * 25) {
+			input_err(true, &ts->client->dev,
+					"%s: Time Over (%02X,%02X,%02X,%02X,%02X,%02X,%02X,%02X)\n",
+					__func__, data[0], data[1], data[2], data[3],
+					data[4], data[5], data[6], data[7]);
+			break;
+		}
+		sec_delay(20);
+	}
+
+error:
+	mutex_unlock(&ts->fn_mutex);
+
+	if (rc != 0) {
+		snprintf(buff, sizeof(buff), "NG,%X,%X,%X,%X", data[0], data[1], data[2], data[3]);
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+	} else {
+		snprintf(buff, sizeof(buff), "OK,%X,%X,%X,%X", data[0], data[1], data[2], data[3]);
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+	}
+	if (sec->cmd_all_factory_state == SEC_CMD_STATUS_RUNNING)
+		sec_cmd_set_cmd_result_all(sec, buff, strnlen(buff, sizeof(buff)), "POLARITY");
+	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+
+	stm_ts_reinit(ts);
+	enable_irq(ts->irq);
+}
+
 static void run_force_calibration(void *device_data)
 {
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
@@ -5327,6 +5397,7 @@ static void factory_cmd_result_all(void *device_data)
 	run_self_jitter(sec);
 	run_factory_miscalibration(sec);
 	run_sram_test(sec);
+	run_polarity_test(sec);
 
 	sec->cmd_all_factory_state = SEC_CMD_STATUS_OK;
 
@@ -6499,6 +6570,7 @@ struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("run_snr_touched", run_snr_touched),},
 	{SEC_CMD("run_color_diff_test", run_color_diff_test),},
 	{SEC_CMD("run_sram_test", run_sram_test),},
+	{SEC_CMD("run_polarity_test", run_polarity_test),},
 	{SEC_CMD("run_force_calibration", run_force_calibration),},
 	{SEC_CMD("set_factory_level", set_factory_level),},
 	{SEC_CMD("factory_cmd_result_all", factory_cmd_result_all),},

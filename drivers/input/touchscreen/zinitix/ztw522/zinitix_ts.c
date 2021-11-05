@@ -6137,6 +6137,74 @@ NG:
 #endif
 }
 
+static void get_raw_diff(void *device_data)
+{
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
+	struct zt75xx_ts_info *info = container_of(sec, struct zt75xx_ts_info, sec);
+	struct i2c_client *client = info->client;
+	char buff[SEC_CMD_STR_LEN] = { 0 };
+	u16 raw_diff;
+	int ret;
+
+	sec_cmd_set_default_result(sec);
+
+	if (info->power_state == POWER_STATE_OFF) {
+		input_err(true, &info->client->dev, "%s: IC is power off\n", __func__);
+		snprintf(buff, sizeof(buff), "NG");
+		sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		return;
+	}
+
+	write_reg(client, 0x0A, 0x0A);
+
+#if ESD_TIMER_INTERVAL
+	esd_timer_stop(info);
+	write_reg(client, ZT75XX_PERIODICAL_INTERRUPT_INTERVAL, 0);
+	write_cmd(client, ZT75XX_CLEAR_INT_STATUS_CMD);
+#endif
+
+	if (write_reg(info->client, ZT75XX_JITTER_SAMPLING_CNT, 100) != I2C_SUCCESS)
+		input_info(true, &client->dev, "%s: Fail to set JITTER_CNT.\n", __func__);
+
+	ret = ts_set_touchmode(TOUCH_JITTER_MODE);
+	if (ret < 0) {
+		ts_set_touchmode(TOUCH_POINT_MODE);
+		goto out;
+	}
+
+	msleep(1500);
+	ret = read_data(info->client, ZT75XX_RAW_DIFF, (u8 *)&raw_diff, 2);
+	if (ret < 0) {
+		ts_set_touchmode(TOUCH_POINT_MODE);
+		goto out;
+	}
+	ts_set_touchmode(TOUCH_POINT_MODE);
+
+	snprintf(buff, sizeof(buff), "%d,%d", 0, raw_diff);
+	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+	if (sec->cmd_all_factory_state == SEC_CMD_STATUS_RUNNING)
+		sec_cmd_set_cmd_result_all(sec, buff, strnlen(buff, sizeof(buff)), "RAW_DIFF");
+	sec->cmd_state = SEC_CMD_STATUS_OK;
+
+out:
+	if (ret < 0) {
+		snprintf(buff, sizeof(buff), "%s", "NG");
+		sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+		if (sec->cmd_all_factory_state == SEC_CMD_STATUS_RUNNING)
+			sec_cmd_set_cmd_result_all(sec, buff, strnlen(buff, sizeof(buff)), "RAW_DIFF");
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+	}
+	input_info(true, &client->dev, "%s: \"%s\"(%d)\n", __func__, sec->cmd_result,
+				(int)strlen(sec->cmd_result));
+
+#if ESD_TIMER_INTERVAL
+	esd_timer_start(CHECK_ESD_TIMER, info);
+	write_reg(client, ZT75XX_PERIODICAL_INTERRUPT_INTERVAL,
+		SCAN_RATE_HZ * ESD_TIMER_INTERVAL);
+#endif
+}
+
 #define I2C_BUFFER_SIZE 64
 static int get_raw_data_size(struct zt75xx_ts_info *info, u8 *buff, int skip_cnt, int sz)
 {
@@ -8340,6 +8408,7 @@ static void factory_cmd_result_all(void *device_data)
 	run_selfdnd_read(sec);
 	run_selfdnd_h_gap_read(sec);
 	run_ssr_read(sec);
+	get_raw_diff(sec);
 
 	sec->cmd_all_factory_state = SEC_CMD_STATUS_OK;
 
@@ -9024,6 +9093,7 @@ static struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("run_jitter_read", run_jitter_read),},
 	{SEC_CMD("get_jitter", get_jitter),},
 	{SEC_CMD("run_jitter_read_all", run_jitter_read_all),},
+	{SEC_CMD("get_raw_diff", get_raw_diff),},
 	{SEC_CMD("run_reference_read", run_reference_read),},
 	{SEC_CMD("get_reference", get_reference),},
 	{SEC_CMD("run_pba_linecheck", run_pba_linecheck),},

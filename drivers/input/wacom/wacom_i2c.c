@@ -47,9 +47,15 @@ void wacom_forced_release(struct wacom_i2c *wac_i2c)
 		input_info(true, &wac_i2c->client->dev, "%s : [R] dd:%d,%d mc:%d & [HO] dd:%d,%d\n",
 				__func__, wac_i2c->x - wac_i2c->p_x, wac_i2c->y - wac_i2c->p_y,
 				wac_i2c->mcount, wac_i2c->x - wac_i2c->hi_x, wac_i2c->y - wac_i2c->hi_y);
+#if IS_ENABLED(CONFIG_INPUT_SEC_NOTIFIER)
+		sec_input_notify(&wac_i2c->nb, NOTIFIER_WACOM_PEN_HOVER_OUT, NULL);
+#endif
 	} else  if (wac_i2c->pen_prox) {
 		input_info(true, &wac_i2c->client->dev, "%s : [HO] dd:%d,%d mc:%d\n",
 				__func__, wac_i2c->x - wac_i2c->hi_x, wac_i2c->y - wac_i2c->hi_y, wac_i2c->mcount);
+#if IS_ENABLED(CONFIG_INPUT_SEC_NOTIFIER)
+		sec_input_notify(&wac_i2c->nb, NOTIFIER_WACOM_PEN_HOVER_OUT, NULL);
+#endif
 	} else {
 		input_info(true, &wac_i2c->client->dev, "%s : pen_prox(%d), pen_pressed(%d)\n",
 				__func__, wac_i2c->pen_prox, wac_i2c->pen_pressed);
@@ -60,10 +66,16 @@ void wacom_forced_release(struct wacom_i2c *wac_i2c)
 				__func__, wac_i2c->x, wac_i2c->y,
 				wac_i2c->x - wac_i2c->p_x, wac_i2c->y - wac_i2c->p_y,
 				wac_i2c->mcount, wac_i2c->x - wac_i2c->hi_x, wac_i2c->y - wac_i2c->hi_y);
+#if IS_ENABLED(CONFIG_INPUT_SEC_NOTIFIER)
+		sec_input_notify(&wac_i2c->nb, NOTIFIER_WACOM_PEN_HOVER_OUT, NULL);
+#endif
 	} else  if (wac_i2c->pen_prox) {
 		input_info(true, &wac_i2c->client->dev, "%s : [HO] lx:%d ly:%d dd:%d,%d mc:%d\n",
 				__func__, wac_i2c->x, wac_i2c->y,
 				wac_i2c->x - wac_i2c->hi_x, wac_i2c->y - wac_i2c->hi_y, wac_i2c->mcount);
+#if IS_ENABLED(CONFIG_INPUT_SEC_NOTIFIER)
+		sec_input_notify(&wac_i2c->nb, NOTIFIER_WACOM_PEN_HOVER_OUT, NULL);
+#endif
 	} else {
 		input_info(true, &wac_i2c->client->dev, "%s : pen_prox(%d), pen_pressed(%d)\n",
 				__func__, wac_i2c->pen_prox, wac_i2c->pen_pressed);
@@ -1391,6 +1403,9 @@ static void wacom_i2c_coord_handler(struct wacom_i2c *wac_i2c, char *data)
 					wac_i2c->x, wac_i2c->y, location, input == wac_i2c->input_dev_unused ? "unused_" : "",
 					wac_i2c->tool == BTN_TOOL_PEN ? "pen" : "rubber", data[0]);
 #endif
+#if IS_ENABLED(CONFIG_INPUT_SEC_NOTIFIER)
+			sec_input_notify(&wac_i2c->nb, NOTIFIER_WACOM_PEN_HOVER_IN, NULL);
+#endif
 			return;
 		}
 
@@ -1505,7 +1520,9 @@ static void wacom_i2c_coord_handler(struct wacom_i2c *wac_i2c, char *data)
 			input_info(true, &client->dev, "%s: set activate time(%lld)\n",
 						__func__, wac_i2c->activate_time);
 #endif
-
+#if IS_ENABLED(CONFIG_INPUT_SEC_NOTIFIER)
+			sec_input_notify(&wac_i2c->nb, NOTIFIER_WACOM_PEN_HOVER_OUT, NULL);
+#endif
 			wac_i2c->p_x = wac_i2c->p_y = wac_i2c->hi_x = wac_i2c->hi_y = 0;
 
 		} else {

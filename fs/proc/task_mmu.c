@@ -1812,7 +1812,7 @@ static int writeback_pte_range(pmd_t *pmd, unsigned long addr,
 	spinlock_t *ptl;
 	LIST_HEAD(swp_entry_list);
 
-	if (pmd_trans_huge(*pmd))
+	if (pmd_trans_unstable(pmd))
 		return 0;
 	if (rwsem_is_contended(&mm->mmap_sem))
 		return -1;

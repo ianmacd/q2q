@@ -38,7 +38,7 @@
 #define MFC_FLASH_FW_HEX_LSI_PATH	"mfc/mfc_fw_flash_s2miw04.bin"
 
 /* for SPU FW update */
-#define MFC_FW_SPU_BIN_PATH		"mfc/mfc_fw_flash_s2miw04.bin"
+#define MFC_FW_SPU_BIN_PATH		"mfc/mfc_fw_spu_s2miw04.bin"
 
 #define MFC_CHIP_ID_P9320		0x20
 #define MFC_CHIP_ID_S2MIW04		0x04

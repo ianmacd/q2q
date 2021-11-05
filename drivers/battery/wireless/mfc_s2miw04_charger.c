@@ -36,7 +36,9 @@
 #include <linux/vmalloc.h>
 #include <linux/ctype.h>
 #include <linux/firmware.h>
+#if IS_ENABLED(CONFIG_SPU_VERIFY)
 #include <linux/spu-verify.h>
+#endif
 
 #define ENABLE 1
 #define DISABLE 0
@@ -1983,6 +1985,7 @@ static void mfc_wpc_fw_update_work(struct work_struct *work)
 	char fwdate[8] = {32, 32, 32, 32, 32, 32, 32, 32};
 	u8 data = 32; /* ascii space */
 	const char *fw_path = MFC_FLASH_FW_HEX_LSI_PATH;
+	int fw_size;
 
 	pr_info("%s: firmware update mode is = %d\n", __func__, charger->fw_cmd);
 
@@ -1994,6 +1997,7 @@ static void mfc_wpc_fw_update_work(struct work_struct *work)
 
 	switch (charger->fw_cmd) {
 	case SEC_WIRELESS_RX_SPU_MODE:
+	case SEC_WIRELESS_RX_SPU_VERIFY_MODE:
 	case SEC_WIRELESS_RX_SDCARD_MODE:
 	case SEC_WIRELESS_RX_INIT:
 	case SEC_WIRELESS_RX_BUILT_IN_MODE:
@@ -2026,7 +2030,8 @@ static void mfc_wpc_fw_update_work(struct work_struct *work)
 
 		dev_err(&charger->client->dev, "%s, request_firmware\n", __func__);
 
-		if (charger->fw_cmd == SEC_WIRELESS_RX_SPU_MODE)
+		if (charger->fw_cmd == SEC_WIRELESS_RX_SPU_MODE ||
+			charger->fw_cmd == SEC_WIRELESS_RX_SPU_VERIFY_MODE)
 			fw_path = MFC_FW_SPU_BIN_PATH;
 		else if (charger->fw_cmd == SEC_WIRELESS_RX_SDCARD_MODE)
 			fw_path = MFC_FW_SDCARD_BIN_PATH;
@@ -2040,6 +2045,26 @@ static void mfc_wpc_fw_update_work(struct work_struct *work)
 			charger->pdata->otp_firmware_result = MFC_FWUP_ERR_REQUEST_FW_BIN;
 			goto fw_err;
 		}
+		fw_size = (int)charger->firm_data_bin->size;
+
+#if IS_ENABLED(CONFIG_SPU_VERIFY)
+		if (charger->fw_cmd == SEC_WIRELESS_RX_SPU_MODE ||
+			charger->fw_cmd == SEC_WIRELESS_RX_SPU_VERIFY_MODE) {
+			if (spu_firmware_signature_verify("MFC", charger->firm_data_bin->data, charger->firm_data_bin->size) ==
+				(fw_size - SPU_METADATA_SIZE(MFC))) {
+				pr_err("%s: spu_firmware_signature_verify success\n", __func__);
+				fw_size -= SPU_METADATA_SIZE(MFC);
+				if (charger->fw_cmd == SEC_WIRELESS_RX_SPU_VERIFY_MODE) {
+					charger->pdata->otp_firmware_result = MFC_FW_RESULT_PASS;
+					goto fw_err;
+				}
+			} else {
+				pr_err("%s: spu_firmware_signature_verify failed\n", __func__);
+				goto fw_err;
+			}
+		}
+#endif
+
 		disable_irq(charger->pdata->irq_wpc_int);
 		disable_irq(charger->pdata->irq_wpc_det);
 		if (charger->pdata->irq_wpc_pdrc)
@@ -2047,8 +2072,8 @@ static void mfc_wpc_fw_update_work(struct work_struct *work)
 		if (charger->pdata->irq_wpc_pdet_b)
 			disable_irq(charger->pdata->irq_wpc_pdet_b);
 		__pm_stay_awake(charger->wpc_update_ws);
-		pr_info("%s data size = %ld\n", __func__, charger->firm_data_bin->size);
-		ret = PgmOTPwRAM_LSI(charger, 0, charger->firm_data_bin->data, 0, charger->firm_data_bin->size);
+		pr_info("%s data size = %ld\n", __func__, (long)fw_size);
+		ret = PgmOTPwRAM_LSI(charger, 0, charger->firm_data_bin->data, 0, fw_size);
 
 		release_firmware(charger->firm_data_bin);
 

@@ -35,7 +35,11 @@
 #if IS_ENABLED(CONFIG_HALL_NOTIFIER)
 #include <linux/hall/hall_ic_notifier.h>
 #endif
-
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
+#if IS_ENABLED(CONFIG_USB_HW_PARAM)
+#include <linux/usb_notify.h>
+#endif
+#endif
 /*
  * Switch events
  */
@@ -259,6 +263,18 @@ static void hall_ic_work(struct work_struct *work)
 	hall_notifier_notify(hall->name, state);
 #endif
 	mutex_unlock(&gddata->lock);
+
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
+#if IS_ENABLED(CONFIG_USB_HW_PARAM)
+	if (strncmp(hall->name, "flip", 4) == 0) {
+		struct otg_notify *o_notify = get_otg_notify();
+
+		if (state && o_notify)
+			inc_hw_param(o_notify, USB_HALL_FOLDING_COUNT);
+
+	}
+#endif
+#endif
 }
 #endif
 

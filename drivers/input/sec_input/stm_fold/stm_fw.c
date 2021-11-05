@@ -521,6 +521,8 @@ static const int stm_ts_fw_updater(struct stm_ts_data *ts, const u8 *fw_data)
 
 	retry = 0;
 
+	disable_irq(ts->client->irq);
+
 	while (1) {
 		retval = stm_ts_fw_burn(ts, fw_data);
 		if (retval >= 0) {
@@ -555,6 +557,9 @@ static const int stm_ts_fw_updater(struct stm_ts_data *ts, const u8 *fw_data)
 			break;
 		}
 	}
+
+	enable_irq(ts->client->irq);
+
 	return retval;
 }
 

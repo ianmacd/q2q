@@ -1144,11 +1144,6 @@ void sec_bat_wpc_tx_work_content(struct sec_battery_info *battery)
 			break;
 		}
 
-		if (battery->afc_disable) {
-			battery->afc_disable = false;
-			muic_hv_charger_disable(battery->afc_disable);
-		}
-
 		if (!battery->buck_cntl_by_tx) {
 			battery->buck_cntl_by_tx = true;
 			sec_vote(battery->chgen_vote, VOTER_WC_TX, true, SEC_BAT_CHG_MODE_BUCK_OFF);
@@ -1172,11 +1167,6 @@ void sec_bat_wpc_tx_work_content(struct sec_battery_info *battery)
 
 #if defined(CONFIG_TX_GEAR_PHM_VOUT_CTRL)
 			if (battery->pdata->phm_vout_ctrl_dev & SEC_WIRELESS_PHM_VOUT_CTRL_GEAR && !battery->wc_tx_phm_mode) {
-				if (battery->afc_disable) {
-					battery->afc_disable = false;
-					muic_hv_charger_disable(battery->afc_disable);
-				}
-
 				if ((battery->wire_status == SEC_BATTERY_CABLE_HV_TA_CHG_LIMIT) ||
 					(is_pd_wire_type(battery->wire_status) && !battery->hv_pdo)) {
 					pr_info("@Tx_Mode %s : charging voltage change(5V -> 9V)\n", __func__);
@@ -1200,11 +1190,6 @@ void sec_bat_wpc_tx_work_content(struct sec_battery_info *battery)
 				}
 			} else {
 #endif
-				if (!battery->afc_disable) {
-					battery->afc_disable = true;
-					muic_hv_charger_disable(battery->afc_disable);
-				}
-
 				if (is_hv_wire_type(battery->wire_status) ||
 					(is_pd_wire_type(battery->wire_status) && battery->hv_pdo)) {
 					pr_info("@Tx_Mode %s : change iv(9V -> 5V).\n", __func__);
@@ -1379,10 +1364,6 @@ void sec_bat_wpc_tx_work_content(struct sec_battery_info *battery)
 #if defined(CONFIG_TX_GEAR_PHM_VOUT_CTRL)
 		if (battery->pdata->phm_vout_ctrl_dev & SEC_WIRELESS_PHM_VOUT_CTRL_BUDS && battery->wc_tx_phm_mode) {
 			pr_info("@Tx_Mode %s : phm on status.\n", __func__);
-			if (!battery->afc_disable) {
-				battery->afc_disable = true;
-				muic_hv_charger_disable(battery->afc_disable);
-			}
 
 			if (is_hv_wire_type(battery->wire_status) ||
 				(is_pd_wire_type(battery->wire_status) && battery->hv_pdo)) {
@@ -1594,11 +1575,6 @@ void sec_bat_wpc_tx_en_work_content(struct sec_battery_info *battery)
 
 		if (battery->pdata->charging_limit_by_tx_check)
 			sec_vote(battery->fcc_vote, VOTER_WC_TX, false, 0);
-
-		if (battery->afc_disable) {
-			battery->afc_disable = false;
-			muic_hv_charger_disable(battery->afc_disable);
-		}
 
 		if (is_pd_apdo_wire_type(battery->cable_type) || battery->buck_cntl_by_tx) {
 			battery->buck_cntl_by_tx = false;

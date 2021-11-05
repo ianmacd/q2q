@@ -1973,6 +1973,13 @@ int sec_bat_parse_dt(struct device *dev,
 		pdata->max_charging_charge_power = 25000;
 	}
 
+	ret = of_property_read_u32(np, "battery,apdo_max_volt",
+			&pdata->apdo_max_volt);
+	if (ret) {
+		pr_err("%s: apdo_max_volt is Empty\n", __func__);
+		pdata->apdo_max_volt = 10000; /* 10v */
+	}
+
 #if IS_ENABLED(CONFIG_DUAL_BATTERY)
 #if defined(CONFIG_DUAL_BATTERY_CELL_SENSING)
 	ret = of_property_read_u32(np, "battery,main_cell_margin_cv",
@@ -2107,6 +2114,11 @@ int sec_bat_parse_dt(struct device *dev,
 				ret = pdata->main_bat_enb_gpio = of_get_named_gpio(np, "limiter,main_bat_enb_gpio", 0);
 				if (ret < 0)
 					pr_info("%s : can't get main_bat_enb_gpio\n", __func__);
+
+				/* MAIN_BATTERY_SW_EN2 */
+				ret = pdata->main_bat_enb2_gpio = of_get_named_gpio(np, "limiter,main_bat_enb2_gpio", 0);
+				if (ret < 0)
+					pr_info("%s : can't get main_bat_enb2_gpio\n", __func__);
 			}
 		}
 		np = of_find_node_by_name(NULL, "sec-dual-battery");
