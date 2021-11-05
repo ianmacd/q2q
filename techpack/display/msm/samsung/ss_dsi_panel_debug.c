@@ -846,9 +846,34 @@ int ss_check_ecc_err(struct samsung_display_driver_data *vdd, u8 *ecc)
 	return ret;
 }
 
+int ss_read_flash_loading_err(struct samsung_display_driver_data *vdd, u8 *flash_load)
+{
+	int ret = 0;
+
+	*flash_load = 0;
+
+	if (SS_IS_CMDS_NULL(ss_get_cmds(vdd, RX_FLASH_LOADING_CHECK)))
+		return ret;
+
+	ret = ss_panel_data_read(vdd, RX_FLASH_LOADING_CHECK, flash_load, LEVEL1_KEY);
+	if (ret) {
+		LCD_INFO(vdd, "fail to read flash_loading_err (ret=%d)\n", ret);
+		return ret;
+	}
+
+	/*
+	* 0 : flash_load success 
+ 	* others : flassh_load fail
+ 	*/
+	if (*flash_load) {
+		LCD_INFO(vdd, "flash_loading err 0x%x\n", *flash_load);
+	}
+	return *flash_load;	
+}
+
 int ss_read_ddi_debug_reg(struct samsung_display_driver_data *vdd)
 {
-	u8 rddpm, rddsm, dsierr_cnt, ecc;
+	u8 rddpm, rddsm, dsierr_cnt, ecc, flash_load;
 	u16 esderr, protocol_err;
 	int ret = 0;
 
@@ -858,17 +883,18 @@ int ss_read_ddi_debug_reg(struct samsung_display_driver_data *vdd)
 	ret |= ss_check_dsierr(vdd, &dsierr_cnt);
 	ret |= ss_check_mipi_protocol_err(vdd, &protocol_err);
 	ret |= ss_check_ecc_err(vdd, &ecc);
+	ret |= ss_read_flash_loading_err(vdd, &flash_load);
 
 	ss_read_pps_data(vdd);
 
 	SS_XLOG(rddpm, rddsm, esderr, dsierr_cnt, protocol_err, ecc);
 
 	if (ret)
-		LCD_INFO(vdd, "error: panel dbg: %x %x %x %x %x %x\n",
-				rddpm, rddsm, esderr, dsierr_cnt, protocol_err, ecc);
+		LCD_INFO(vdd, "error: panel dbg: %x %x %x %x %x %x %x\n",
+				rddpm, rddsm, esderr, dsierr_cnt, protocol_err, ecc, flash_load);
 	else
-		LCD_INFO(vdd, "pass: panel dbg: %x %x %x %x %x %x\n",
-				rddpm, rddsm, esderr, dsierr_cnt, protocol_err, ecc);
+		LCD_INFO(vdd, "pass: panel dbg: %x %x %x %x %x %x %x\n",
+				rddpm, rddsm, esderr, dsierr_cnt, protocol_err, ecc, flash_load);
 
 	return ret;
 }
@@ -906,11 +932,11 @@ char bootloader_pps2_data[SZ_64]; /* 0xA2 : PPS data (0x2d ~ 0x58)*/
 int ss_read_pps_data(struct samsung_display_driver_data *vdd)
 {
 	int ret;
-#if IS_ENABLED(CONFIG_SEC_F2Q_PROJECT)
-	LCD_INFO(vdd, "temp block ss_read_pps_data\n");
-	//Temporally blocked because of null pointer error.
-	return 0;
-#endif
+
+	if (SS_IS_CMDS_NULL(ss_get_cmds(vdd, RX_LDI_DEBUG_PPS1)) ||
+		SS_IS_CMDS_NULL(ss_get_cmds(vdd, RX_LDI_DEBUG_PPS2)))
+		return ret;
+
 	ret = ss_panel_data_read(vdd, RX_LDI_DEBUG_PPS1, bootloader_pps1_data, LEVEL1_KEY);
 	if (ret) {
 		LCD_INFO(vdd, "fail to read pps_data(ret=%d)\n", ret);

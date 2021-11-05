@@ -2043,7 +2043,7 @@ static void pn547_shutdown(struct i2c_client *client)
 		/* ese spi pin configuration should be set to out/pd/low before VDDIO level becomes low to avoid floating */
 		if (pn547_dev->ese_shutdown) {
 			pn547_dev->ese_shutdown();
-			usleep_range(1000, 1100);
+			usleep_range(5000, 5100);
 		}
 
 		if (pn547_dev->ap_vendor != AP_VENDOR_SLSI) {
@@ -2060,6 +2060,7 @@ static void pn547_shutdown(struct i2c_client *client)
 			};
 			/* VEN low -> VDDIO low : spec - within 3ms */
 			gpio_direction_output(pn547_dev->ven_gpio, 0);
+			usleep_range(300, 310);
 			ret = pn547_regulator_onoff(&client->dev, pn547_dev, NFC_I2C_LDO_OFF);
 			if (ret < 0)
 				NFC_LOG_ERR("regulator_on fail err: %d\n", ret);

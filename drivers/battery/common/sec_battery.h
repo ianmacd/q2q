@@ -561,6 +561,7 @@ typedef struct sec_battery_platform_data {
 	unsigned int wc_full_input_limit_current;
 	unsigned int max_charging_current;
 	unsigned int max_charging_charge_power;
+	unsigned int apdo_max_volt;
 	int mix_high_temp;
 	int mix_high_chg_temp;
 	int mix_high_temp_recovery;
@@ -633,6 +634,7 @@ typedef struct sec_battery_platform_data {
 	char *sub_limiter_name;
 	bool support_dual_battery;
 	int main_bat_enb_gpio;
+	int main_bat_enb2_gpio;
 	int sub_bat_enb_gpio;
 #endif
 
@@ -843,6 +845,8 @@ struct sec_battery_info {
 	int voltage_pack_sub;		/* pack voltage sub battery (mV) */
 	int current_now_main;		/* current from main battery (mA) */
 	int current_now_sub;		/* current from sub battery (mA) */
+
+	unsigned int limiter_check;
 #if defined(CONFIG_DUAL_BATTERY_CELL_SENSING)
 	int voltage_cell_main;		/* cell voltage main battery (mV) */
 	int voltage_cell_sub;		/* cell voltage sub battery (mV) */

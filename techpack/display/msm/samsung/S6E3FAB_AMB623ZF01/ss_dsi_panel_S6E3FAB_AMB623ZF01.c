@@ -84,21 +84,27 @@ static int samsung_panel_on_pre(struct samsung_display_driver_data *vdd)
 	return true;
 }
 
+extern unsigned int lpcharge;
+
 static int samsung_panel_on_post(struct samsung_display_driver_data *vdd)
 {
 	/*
 	 * self mask is enabled from bootloader.
 	 * so skip self mask setting during splash booting.
 	 */
-	if (!vdd->samsung_splash_enabled) {
-		if (vdd->self_disp.self_mask_img_write)
-			vdd->self_disp.self_mask_img_write(vdd);
-	} else {
-		LCD_INFO(vdd, "samsung splash enabled.. skip image write\n");
-	}
+	if (!lpcharge) {
+		if (!vdd->samsung_splash_enabled) {
+			if (vdd->self_disp.self_mask_img_write)
+				vdd->self_disp.self_mask_img_write(vdd);
+		} else {
+			LCD_INFO(vdd, "samsung splash enabled.. skip image write\n");
+		}
 
-	if (vdd->self_disp.self_mask_on)
-		vdd->self_disp.self_mask_on(vdd, true);
+		if (vdd->self_disp.self_mask_on)
+			vdd->self_disp.self_mask_on(vdd, true);
+	} else {
+		LCD_ERR(vdd, "Do not enable self mask in lpcharge mode..\n");
+	}
 
 	/* mafpc */
 	if (vdd->mafpc.is_support) {

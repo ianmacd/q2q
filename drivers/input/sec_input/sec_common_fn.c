@@ -1178,6 +1178,7 @@ int sec_input_parse_dt(struct device *dev)
 	pdata->support_input_monitor = of_property_read_bool(np, "support_input_monitor");
 	pdata->chip_on_board = of_property_read_bool(np, "chip_on_board");
 	pdata->disable_vsync_scan = of_property_read_bool(np, "disable_vsync_scan");
+	pdata->unuse_dvdd_power = of_property_read_bool(np, "sec,unuse_dvdd_power");
 	of_property_read_u32(np, "support_rawdata_map_num", &pdata->support_rawdata_map_num);
 
 	if (of_property_read_u32(np, "sec,support_dual_foldable", &pdata->support_dual_foldable) < 0)
@@ -1209,13 +1210,13 @@ int sec_input_parse_dt(struct device *dev)
 #endif
 	input_err(true, dev, "%s: i2c buffer limit: %d, lcd_id:%06X, bringup:%d,"
 			" id:%d,%d, dex:%d, max(%d/%d), FOD:%d, AOT:%d, ED:%d, FLM:%d,"
-			" COB:%d, disable_vsync_scan:%d\n",
+			" COB:%d, disable_vsync_scan:%d unuse_dvdd_power:%d\n",
 			__func__, pdata->i2c_burstmax, lcd_type, pdata->bringup,
 			pdata->tsp_id, pdata->tsp_icid,
 			pdata->support_dex, pdata->max_x, pdata->max_y,
 			pdata->support_fod, pdata->enable_settings_aot,
 			pdata->support_ear_detect, pdata->support_fod_lp_mode,
-			pdata->chip_on_board, pdata->disable_vsync_scan);
+			pdata->chip_on_board, pdata->disable_vsync_scan, pdata->unuse_dvdd_power);
 	return ret;
 }
 EXPORT_SYMBOL(sec_input_parse_dt);

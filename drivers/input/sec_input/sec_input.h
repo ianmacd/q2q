@@ -433,6 +433,8 @@ enum sec_input_notify_t {
 	NOTIFIER_WACOM_PEN_CHARGING_STARTED,	/* to tsp: pen charging started */
 	NOTIFIER_WACOM_PEN_INSERT,		/* to tsp: pen is inserted */
 	NOTIFIER_WACOM_PEN_REMOVE,		/* to tsp: pen is removed */
+	NOTIFIER_WACOM_PEN_HOVER_IN,		/* to tsp: pen hover is in */
+	NOTIFIER_WACOM_PEN_HOVER_OUT,		/* to tsp: pen hover is out */
 	NOTIFIER_LCD_VRR_LFD_LOCK_REQUEST,	/* to LCD: set LFD min lock */
 	NOTIFIER_LCD_VRR_LFD_LOCK_RELEASE,	/* to LCD: unset LFD min lock */
 	NOTIFIER_LCD_VRR_LFD_OFF_REQUEST,	/* to LCD: set LFD OFF */
@@ -677,6 +679,7 @@ struct sec_ts_plat_data {
 	int support_sensor_hall;
 	int support_rawdata_map_num;
 	bool disable_vsync_scan;
+	bool unuse_dvdd_power;
 	bool chip_on_board;
 
 	struct completion resume_done;

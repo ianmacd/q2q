@@ -241,33 +241,44 @@ __visible_for_testing ssize_t store_abc_enabled(struct device *dev,
 	struct abc_info *pinfo = dev_get_drvdata(sec_abc);
 
 	if (!strncmp(buf, "1", 1)) {
-		ABC_PRINT("ABC driver enabled.\n");
+		ABC_PRINT("ERROR report mode enabled.\n");
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("ABC driver enabled.\n");
+		abc_common_test_get_log_str("ERROR report mode enabled.\n");
 #endif
-		abc_enabled = ABC_TYPE1_ENABLED;
-		complete(&pinfo->enable_done);
-	} else if (!strncmp(buf, "2", 1)) {
-		ABC_PRINT("Common driver enabled.\n");
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("Common driver enabled.\n");
-#endif
-		abc_enabled = ABC_TYPE2_ENABLED;
-
+		abc_enabled |= ERROR_REPORT_MODE_BIT;
 		complete(&pinfo->enable_done);
 	} else if (!strncmp(buf, "0", 1)) {
-		ABC_PRINT("ABC/Common driver disabled.\n");
+		ABC_PRINT("ERROR report mode disabled.\n");
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("ABC/Common driver disabled.\n");
+		abc_common_test_get_log_str("ERROR report mode disabled.\n");
 #endif
-		if (abc_enabled == ABC_TYPE1_ENABLED) {
-			sec_abc_reset_gpu_buffer();
-			sec_abc_reset_gpu_page_buffer();
-			sec_abc_reset_aicl_buffer();
-		}
-
-		abc_enabled = ABC_DISABLED;
+		abc_enabled &= ~(ERROR_REPORT_MODE_BIT);
+	} else if (!strncmp(buf, "ALL_REPORT=1", 12)) {
+		ABC_PRINT("ALL report mode enabled.\n");
+#if IS_ENABLED(CONFIG_SEC_KUNIT)
+		abc_common_test_get_log_str("ALL report mode enabled.\n");
+#endif
+		abc_enabled |= ALL_REPORT_MODE_BIT;
+		complete(&pinfo->enable_done);
+	} else if (!strncmp(buf, "ALL_REPORT=0", 12)) {
+		ABC_PRINT("ALL report mode disabled.\n");
+#if IS_ENABLED(CONFIG_SEC_KUNIT)
+		abc_common_test_get_log_str("ALL report mode disabled.\n");
+#endif
+		abc_enabled &= ~(ALL_REPORT_MODE_BIT);
+	} else {
+		ABC_PRINT("Invalid input.\n");
+#if IS_ENABLED(CONFIG_SEC_KUNIT)
+		abc_common_test_get_log_str("Invalid input.\n");
+#endif
 	}
+
+	if (abc_enabled == ABC_DISABLED) {
+		sec_abc_reset_gpu_buffer();
+		sec_abc_reset_gpu_page_buffer();
+		sec_abc_reset_aicl_buffer();
+	}
+
 	return count;
 }
 
@@ -275,7 +286,10 @@ static ssize_t show_abc_enabled(struct device *dev,
 				struct device_attribute *attr,
 				char *buf)
 {
-	return sprintf(buf, "%d\n", abc_enabled);
+	if (abc_enabled)
+		return sprintf(buf, "1\n");
+	else
+		return sprintf(buf, "0\n");
 }
 static DEVICE_ATTR(enabled, 0644, show_abc_enabled, store_abc_enabled);
 
@@ -388,6 +402,25 @@ int sec_abc_get_enabled(void)
 }
 EXPORT_SYMBOL(sec_abc_get_enabled);
 
+static void sec_abc_get_uevent_level_str(char *uevent_level_str, char *event_level, char *event_type)
+{
+	if (abc_enabled & ALL_REPORT_MODE_BIT) {
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		if (!strncmp(event_type, "gpu_", 4))
+			snprintf(uevent_level_str, ABC_BUFFER_MAX, "WARN=%s", event_type);
+		else
+			snprintf(uevent_level_str, ABC_BUFFER_MAX, "INFO=%s", event_type);
+#else
+		if (!strncmp(event_level, "INFO", 4))
+			snprintf(uevent_level_str, ABC_BUFFER_MAX, "INFO=%s", event_type);
+		else
+			snprintf(uevent_level_str, ABC_BUFFER_MAX, "WARN=%s", event_type);
+#endif
+	} else {
+		snprintf(uevent_level_str, ABC_BUFFER_MAX, "%s=%s", event_level, event_type);
+	}
+}
+
 static void sec_abc_work_func(struct work_struct *work)
 {
 	struct abc_info *pinfo = container_of(work, struct abc_info, work);
@@ -402,6 +435,7 @@ static void sec_abc_work_func(struct work_struct *work)
 	char *c, *p, *p2;
 	char *uevent_str[ABC_UEVENT_MAX] = {0,};
 	char temp[ABC_BUFFER_MAX], timestamp[ABC_BUFFER_MAX], temp2[ABC_BUFFER_MAX];
+	char uevent_level_str[ABC_BUFFER_MAX] = {0,};
 	char *event_level, *event_type;
 	int idx = 0;
 	int i = 0;
@@ -445,7 +479,15 @@ static void sec_abc_work_func(struct work_struct *work)
 #if IS_ENABLED(CONFIG_SEC_ABC_MOTTO)
 	motto_send_device_info(event_type);
 #endif
-	if (!strncmp(event_level, "INFO", 4)) {
+
+	sec_abc_get_uevent_level_str(uevent_level_str, event_level, event_type);
+
+	if (abc_enabled & ALL_REPORT_MODE_BIT) {
+		uevent_str[1] = uevent_level_str;
+		kobject_uevent_env(&sec_abc->kobj, KOBJ_CHANGE, uevent_str);
+	}
+
+	if (!strncmp(uevent_level_str, "INFO=", 5)) {
 		ABC_PRINT("event_level is INFO. Don't Send uevent\n");
 		return;
 	}
@@ -479,7 +521,10 @@ static void sec_abc_work_func(struct work_struct *work)
 
 	mutex_unlock(&pinfo->log_mutex);
 
-	if (abc_enabled == ABC_TYPE1_ENABLED) {
+	if (abc_enabled != ABC_DISABLED) {
+		snprintf(uevent_level_str, ABC_BUFFER_MAX, "ERROR=%s", event_type);
+		uevent_str[1] = uevent_level_str;
+
 		pgpu = pinfo->pdata->gpu_items;
 		pgpu_page = pinfo->pdata->gpu_page_items;
 		paicl = pinfo->pdata->aicl_items;
@@ -519,12 +564,6 @@ static void sec_abc_work_func(struct work_struct *work)
 				sec_abc_dequeue(&pgpu->buffer, &out);
 				ABC_PRINT("cur_time : %lu sec cur_cnt : %d\n", out.cur_time, out.cur_cnt);
 			}
-
-#ifdef ABC_WARNING_REPORT
-			/* Send GPU fault warning */
-			strcat(uevent_str[1], "_w");
-			kobject_uevent_env(&sec_abc->kobj, KOBJ_CHANGE, uevent_str);
-#endif
 		} else if (pgpu_page->buffer.size && !strncasecmp(event_type, "gpu_page_fault", 14)) { /* gpu page fault */
 			in.cur_time = (unsigned long)ktime;
 			in.cur_cnt = pgpu_page->fail_cnt++;
@@ -591,12 +630,6 @@ static void sec_abc_work_func(struct work_struct *work)
 			kobject_uevent_env(&sec_abc->kobj, KOBJ_CHANGE, uevent_str);
 			ABC_PRINT("Send uevent.\n");
 		}
-	} else { /* ABC_TYPE2_ENABLED */
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_work_str(uevent_str);
-#endif
-		kobject_uevent_env(&sec_abc->kobj, KOBJ_CHANGE, uevent_str);
-		ABC_PRINT("Send uevent.\n");
 	}
 }
 

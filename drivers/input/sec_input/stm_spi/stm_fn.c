@@ -2211,13 +2211,17 @@ int stm_notifier_call(struct notifier_block *n,
 			unsigned long data, void *v)
 {
 	struct stm_ts_data *ts = container_of(n, struct stm_ts_data, stm_input_nb);
-
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
+	u8 reg[3] = {STM_TS_CMD_SET_FUNCTION_ONOFF, STM_TS_CMD_FUNCTION_SET_HOVER_DETECTION, 0x00};
+	int ret;
+#endif
 	if (ts->plat_data->shutdown_called)
 		return -ENODEV;
 
 	input_dbg(true, &ts->client->dev, "%s: %lu\n", __func__, data);
 
 	switch (data) {
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 	case NOTIFIER_MAIN_TOUCH_ON:
 		if (ts->plat_data->support_dual_foldable == SUB_TOUCH) {
 			input_info(true, &ts->client->dev, "%s: main_tsp open\n", __func__);
@@ -2227,6 +2231,17 @@ int stm_notifier_call(struct notifier_block *n,
 			mutex_unlock(&ts->modechange);
 		}
 		break;
+	case NOTIFIER_WACOM_PEN_HOVER_IN:
+		reg[2] = 1;
+		ret = ts->stm_ts_spi_write(ts, reg, 3, NULL, 0);
+		input_info(true, &ts->client->dev, "%s: pen hover in detect, ret=%d\n", __func__, ret);
+		break;
+	case NOTIFIER_WACOM_PEN_HOVER_OUT:
+		reg[2] = 0;
+		ret = ts->stm_ts_spi_write(ts, reg, 3, NULL, 0);
+		input_info(true, &ts->client->dev, "%s: pen hover out detect, ret=%d\n", __func__, ret);
+		break;
+#endif
 	default:
 		break;
 	}

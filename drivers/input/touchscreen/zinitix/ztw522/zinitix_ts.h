@@ -340,6 +340,8 @@ struct reg_ioctl {
 #define ZT75XX_DND_N_COUNT			0x0122
 #define ZT75XX_DND_U_COUNT			0x0135
 
+#define ZT75XX_RAW_DIFF				0x0146
+
 #define ZT75XX_LPDUMP_UTC_VAL_MSB_REG		0x01FC
 #define ZT75XX_LPDUMP_UTC_VAL_LSB_REG		0x01FD
 

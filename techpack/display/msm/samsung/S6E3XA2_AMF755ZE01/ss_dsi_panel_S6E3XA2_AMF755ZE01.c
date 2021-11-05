@@ -210,9 +210,11 @@ static struct dsi_panel_cmd_set *ss_irc(struct samsung_display_driver_data *vdd,
 static struct dsi_panel_cmd_set * ss_brightness_gamma_mode2_normal(struct samsung_display_driver_data *vdd, int *level_key)
 {
 	struct dsi_panel_cmd_set *pcmds;
+	struct vrr_info *vrr = &vdd->vrr;
 	int idx = 0;
 	int smooth_idx = 0;
 	int tset;
+	bool dim_off = false;
 
 	if (IS_ERR_OR_NULL(vdd)) {
 		LCD_ERR(vdd, ": Invalid data vdd : 0x%zx", (size_t)vdd);
@@ -232,12 +234,24 @@ static struct dsi_panel_cmd_set * ss_brightness_gamma_mode2_normal(struct samsun
 	pcmds->cmds[idx].ss_txbuf[2] = vdd->br_info.common_br.gm2_wrdisbv & 0xFF;
 
 	/* smooth */
-	smooth_idx = ss_get_cmd_idx(pcmds, 0x0E, 0x66);
-	pcmds->cmds[smooth_idx].ss_txbuf[1] = vdd->display_on ? 0x18 : 0x01;
+	if (vrr->cur_refresh_rate == 48 || vrr->cur_refresh_rate == 96)
+		dim_off = true;
+	else
+		dim_off = false;
 
-	LCD_INFO(vdd, "cd_idx: %d, cd_level: %d, WRDISBV: %x %x, smooth : %x\n",
+	smooth_idx = ss_get_cmd_idx(pcmds, 0x0D, 0x66);
+	pcmds->cmds[smooth_idx].ss_txbuf[1] = dim_off ? 0x20 : 0x60;
+
+	smooth_idx = ss_get_cmd_idx(pcmds, 0x0E, 0x66);
+	pcmds->cmds[smooth_idx].ss_txbuf[1] = vdd->display_on ? (dim_off ? 0x01 : 0x18) : 0x01;
+
+	smooth_idx = ss_get_cmd_idx(pcmds, 0x00, 0x53);
+	pcmds->cmds[smooth_idx].ss_txbuf[1] = dim_off ? 0x20 : 0x28;
+
+	LCD_INFO(vdd, "cd_idx: %d, cd_level: %d, WRDISBV: %x %x, fps : %d, smooth : %x\n",
 				vdd->br_info.common_br.cd_idx, vdd->br_info.common_br.cd_level,
 				pcmds->cmds[idx].ss_txbuf[1], pcmds->cmds[idx].ss_txbuf[2],
+				vrr->cur_refresh_rate,
 				pcmds->cmds[smooth_idx].ss_txbuf[1]);
 #if 0
 	/* IRC mode*/
@@ -1746,7 +1760,7 @@ static void ss_set_panel_lpm_brightness(struct samsung_display_driver_data *vdd)
 	struct dsi_panel_cmd_set *set = ss_get_cmds(vdd, TX_LPM_BL_CMD);
 	struct dsi_panel_cmd_set *set_lpm_bl;
 	int cmd_idx, aor_idx;
-	
+
 	if (SS_IS_CMDS_NULL(set)) {
 		LCD_ERR(vdd, "No cmds for TX_LPM_BL_CMD\n");
 		return;
