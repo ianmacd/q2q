@@ -50,7 +50,7 @@ void blob(const char *buffer, const size_t bufLen, const int lineSize)
 				offset += snprintf(stringToPrint + offset, MAX_DATA_LEN - offset, " ");
 		}
 
-		offset += snprintf(stringToPrint + offset, MAX_DATA_LEN - offset, " |");
+		snprintf(stringToPrint + offset, MAX_DATA_LEN - offset, " |");
 		pr_info("%s\n", stringToPrint);
 		memset(stringToPrint, 0, MAX_DATA_LEN);
 		i += line;

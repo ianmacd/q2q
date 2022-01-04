@@ -1042,7 +1042,7 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 				base, base + size);
 	}
 
-	return 0;
+	return 1;
 }
 
 /*

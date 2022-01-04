@@ -108,6 +108,32 @@ config SEC_NFC_LOGGER
           but will not included at dumpstate log.
           so need to copy this file to log folder.
 
+config SEC_NFC_LOGGER_ADD_ACPM_LOG
+        bool "NFC logger: add acpm log"
+        default n
+        depends on SEC_NFC_LOGGER
+        help
+          add acpm log.
+          this feature is for particualr AP.
+          rtc reg addr is needed to compare time
+
+config SEC_NFC_LOGGER_RTC_REG_ADDR
+        hex "NFC logger: add acpm log"
+        default 0x0
+        depends on SEC_NFC_LOGGER_ADD_ACPM_LOG
+        help
+          RTC time is to compare between acpm and kernel.
+          address value is hex.
+
+config MAKE_NODE_USING_PLATFORM_DEVICE
+        bool "eSE platform driver"
+        default n
+        help
+          Using eSE platform driver.
+          Sometimes eSE node is created after permission setting
+          cause of SPI driver dependency.
+          So, use platform driver to make node first.
+
 config SEC_STAR
         tristate "LSI star platform"
         default n
@@ -136,3 +162,9 @@ config NFC_QTI_I2C
           resides in the usermode and it has no other NFC dependencies.
 
           If unsure, say N.
+
+config SEC_NFC_COMPAT_IOCTL
+        bool "NFC compat ioctl"
+        default n
+        help
+          Enable NFC compat ioctl.

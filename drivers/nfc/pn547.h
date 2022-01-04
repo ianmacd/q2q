@@ -293,6 +293,8 @@ struct pn547_dev {
 	int  clk_req_irq;
 	phys_addr_t clkctrl_addr; /*use NFC block of AP*/
 	bool clk_req_wake;
+	bool clk_req_irq_enabled;
+	bool clk_req_wakelock;
 	bool irq_all_trigger;
 
 	long nfc_service_pid; /*used to signal the nfc the nfc service */

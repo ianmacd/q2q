@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -483,8 +483,11 @@ static int ipa3_qmi_send_req_wait(struct qmi_handle *client_handle,
 		req_desc->ei_array,
 		req);
 
-	if (unlikely(!ipa_q6_clnt))
+	if (unlikely(!ipa_q6_clnt)) {
+		mutex_unlock(&ipa3_qmi_lock);
 		return -EINVAL;
+	}
+
 	mutex_unlock(&ipa3_qmi_lock);
 
 	if (ret < 0) {
@@ -1512,13 +1515,14 @@ static void ipa3_q6_clnt_svc_arrive(struct work_struct *work)
 		IPAWANERR(
 		"ipa3_qmi_init_modem_send_sync_msg failed due to SSR!\n");
 		/* Cleanup when ipa3_wwan_remove is called */
+		mutex_lock(&ipa3_qmi_lock);
 		if (ipa_q6_clnt != NULL) {
 			mutex_lock(&ipa3_qmi_lock);
 			qmi_handle_release(ipa_q6_clnt);
 			vfree(ipa_q6_clnt);
 			ipa_q6_clnt = NULL;
-			mutex_unlock(&ipa3_qmi_lock);
 		}
+		mutex_unlock(&ipa3_qmi_lock);
 		IPAWANERR("Exit from service arrive fun\n");
 		return;
 	}

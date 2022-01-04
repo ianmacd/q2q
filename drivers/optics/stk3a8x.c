@@ -219,6 +219,7 @@ static void stk3a8x_start_timer(struct stk3a8x_data *alps_data, stk3a8x_timer_ty
 #ifdef STK_FIFO_ENABLE
 
 		case STK3A8X_FIFO_RELEASE_TIMER:
+#if !defined (DISABLE_ASYNC_STOP_OPERATION)
 			if (alps_data->fifo_release_timer_info.timer_is_exist)
 			{
 				if (alps_data->fifo_release_timer_info.timer_is_active)
@@ -227,14 +228,13 @@ static void stk3a8x_start_timer(struct stk3a8x_data *alps_data, stk3a8x_timer_ty
 				}
 				else
 				{
-#if defined (DISABLE_ASYNC_STOP_OPERATION)
-					stk3a8x_fifo_stop_control(alps_data);
-#else
 					hrtimer_start(&alps_data->fifo_release_timer, alps_data->fifo_release_delay, HRTIMER_MODE_REL);
 					alps_data->fifo_release_timer_info.timer_is_active = true;
-#endif
 				}
 			}
+#else
+			stk3a8x_fifo_stop_control(alps_data);
+#endif
 
 			break;
 #endif
@@ -309,7 +309,10 @@ static int32_t stk3a8x_register_timer(struct stk3a8x_data *alps_data, stk3a8x_ti
 	switch (timer_type)
 	{
 		case STK3A8X_DATA_TIMER_ALPS:
-			alps_data->stk_alps_wq = create_singlethread_workqueue("stk_alps_wq");
+			if (alps_data->stk_alps_wq == NULL) {
+				alps_data->stk_alps_wq = create_singlethread_workqueue("stk_alps_wq");
+			}
+
 			if (alps_data->stk_alps_wq) {
 				INIT_WORK(&alps_data->stk_alps_work, stk3a8x_get_data_polling);
 				hrtimer_init(&alps_data->alps_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -325,7 +328,10 @@ static int32_t stk3a8x_register_timer(struct stk3a8x_data *alps_data, stk3a8x_ti
 
 		case STK3A8X_FIFO_RELEASE_TIMER:
 #if !defined (DISABLE_ASYNC_STOP_OPERATION)
-			alps_data->stk_fifo_release_wq = create_singlethread_workqueue("stk_fifo_release_wq");
+			if (alps_data->stk_fifo_release_wq == NULL) {
+				alps_data->stk_fifo_release_wq = create_singlethread_workqueue("stk_fifo_release_wq");
+			}
+
 			if (alps_data->stk_fifo_release_wq) {
 				INIT_WORK(&alps_data->stk_fifo_release_work, stk3a8x_fifo_stop_control);
 				hrtimer_init(&alps_data->fifo_release_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -1021,6 +1027,12 @@ static uint8_t stk3a8x_als_agc_adjust_down_gain(struct stk3a8x_data *alps_data)
 	bool gain_sel = true;
 	int8_t ret;
 
+	if(!alps_data->als_info.enable)
+	{
+		info_flicker("flicker disabled");
+		return 0;
+	}
+
 	if (alps_data->als_info.als_cur_dgain & STK3A8X_ALS_DGAIN128_MASK)
 	{
 		als_dgain = 4;
@@ -1123,6 +1135,12 @@ static uint8_t stk3a8x_als_agc_adjust_up_gain(struct stk3a8x_data *alps_data)
 {
 	uint8_t  again_sel = 0, dgain_sel = 0, ret;
 	bool gain_sel = true;
+
+	if(!alps_data->als_info.enable)
+	{
+		info_flicker("flicker disabled");
+		return 0;
+	}
 
 	//dgain up.
 	if ( alps_data->als_info.als_cur_again == 0x0)
@@ -1712,8 +1730,7 @@ static ssize_t stk_als_enable_store(struct device *dev,
 
 #if IS_ENABLED(CONFIG_SENSORS_FLICKER_SELF_TEST)
 	if (alps_data->eol_enabled) {
-		printk(KERN_ERR "%s: TEST RUNNING. recover %d after finish test",
-				data);
+		dev_err(&alps_data->client->dev, "%s: TEST RUNNING. recover %d after finish test", __func__, data);
 		alps_data->recover_state = data;
 		return size;
 	}
@@ -1859,8 +1876,12 @@ static ssize_t stk_send_store(struct device *dev, struct device_attribute *attr,
 	char *token[10];
 	struct stk3a8x_data *alps_data =  dev_get_drvdata(dev);
 
-	for (i = 0; i < 2; i++)
-		token[i] = strsep((char **)&buf, " ");
+	for (i = 0; i < 2; i++) {
+		if ((token[i] = strsep((char **)&buf, " ")) == NULL) {
+			err_flicker("invalid input parameter (need two parameters: address and data)\n");
+			return -EINVAL;
+		}
+	}
 
 	if ((ret = kstrtoul(token[0], 16, &temp_addr)) < 0)
 	{
@@ -2000,15 +2021,17 @@ void stk3a8x_fifo_stop_control(struct stk3a8x_data *alps_data)
 {
 	//struct stk3a8x_data *alps_data = container_of(work, struct stk3a8x_data, stk_fifo_release_work);
 
+	flush_workqueue(alps_data->stk_alps_wq);	//stop polling thread before power off
+
 	while (alps_data->fifo_info.fifo_reading)
 	{
 		info_flicker("FIFO is reading!\n");
+		msleep_interruptible(20);	// original delay time of fifo_release_timer
 	}
 
 	info_flicker("Free FIFO array\n");
 	stk3a8x_free_fifo_data(alps_data);
 	alps_data->fifo_info.latency_status = STK3A8X_NONE;
-	stk3a8x_stop_timer(alps_data, STK3A8X_FIFO_RELEASE_TIMER);
 	stk_power_ctrl(alps_data, 0);
 }
 #else
@@ -2099,6 +2122,23 @@ static ssize_t stk_name_show(struct device *dev, struct device_attribute *attr, 
 	return snprintf(buf, PAGE_SIZE, "%s\n", DEVICE_NAME);
 }
 
+static ssize_t stk_flush_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+{
+    	struct stk3a8x_data *data = dev_get_drvdata(dev);
+	int ret = 0;
+	u8 handle = 0;
+
+	ret = kstrtou8(buf, 10, &handle);
+	if (ret < 0) {
+		err_flicker("kstrtou8 failed.(%d)\n", ret);
+		return ret;
+	}
+	input_report_rel(data->als_input_dev, REL_MISC, handle);
+	info_flicker("flush done");
+
+	return size;
+}
+
 static ssize_t stk_nothing_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return 0;
@@ -2111,21 +2151,21 @@ static ssize_t stk_nothing_store(struct device *dev, struct device_attribute *at
 
 static ssize_t stk_factory_cmd_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-    struct stk3a8x_data *data = dev_get_drvdata(dev);
-    static int cmd_result;
+	struct stk3a8x_data *data = dev_get_drvdata(dev);
+	static int cmd_result;
 
-    mutex_lock(&data->data_info_lock);
+	mutex_lock(&data->data_info_lock);
 
-    if (data->isTrimmed)
-        cmd_result = 1;
-    else
-        cmd_result = 0;
+	if (data->isTrimmed)
+		cmd_result = 1;
+	else
+		cmd_result = 0;
 
-    info_flicker("%s - cmd_result = %d\n", __func__, cmd_result);
+	info_flicker("%s - cmd_result = %d\n", __func__, cmd_result);
 
-    mutex_unlock(&data->data_info_lock);
+	mutex_unlock(&data->data_info_lock);
 
-    return snprintf(buf, PAGE_SIZE, "%d\n", cmd_result);
+	return snprintf(buf, PAGE_SIZE, "%d\n", cmd_result);
 }
 
 static ssize_t als_ir_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -2270,7 +2310,7 @@ static DEVICE_ATTR(otp, 0444, stk3a8x_otp_info_show, NULL);
 #endif
 
 static DEVICE_ATTR(name,            0444, stk_name_show,                NULL);
-static DEVICE_ATTR(als_flush,       0664, stk_nothing_show,             stk_nothing_store);
+static DEVICE_ATTR(als_flush,       0664, stk_nothing_show,             stk_flush_store);
 static DEVICE_ATTR(als_factory_cmd, 0444, stk_factory_cmd_show,         NULL);
 static DEVICE_ATTR(als_ir,          0444, als_ir_show,                  NULL);
 static DEVICE_ATTR(als_clear,       0444, als_clear_show,               NULL);
@@ -2412,6 +2452,8 @@ static void stk3a8x_init_para(struct stk3a8x_data *alps_data,
 	alps_data->eol_enabled = false;
 #endif
 	alps_data->saturation = false;
+	alps_data->stk_alps_wq = NULL;
+	alps_data->stk_fifo_release_wq = NULL;
 }
 
 static int32_t stk3a8x_init_all_reg(struct stk3a8x_data *alps_data)
@@ -2548,6 +2590,7 @@ static int32_t stk3a8x_alps_set_config(struct stk3a8x_data *alps_data, bool en)
 
 	if (!en &&  !alps_data->als_info.enable)
 	{
+		flush_workqueue(alps_data->stk_alps_wq);
 		info_flicker("(%d) Stop ALSPS timer\n", __LINE__);
 		stk3a8x_stop_timer(alps_data, STK3A8X_DATA_TIMER_ALPS);
 	}
@@ -2732,6 +2775,7 @@ static int stk3a8x_set_input_devices(struct stk3a8x_data *alps_data)
 	input_set_capability(alps_data->als_input_dev, EV_REL, REL_X);
 	input_set_capability(alps_data->als_input_dev, EV_REL, REL_RY);
 	input_set_capability(alps_data->als_input_dev, EV_REL, REL_RZ);
+	input_set_capability(alps_data->als_input_dev, EV_REL, REL_MISC);
 	err = input_register_device(alps_data->als_input_dev);
 
 	if (err)
@@ -2907,6 +2951,8 @@ int stk3a8x_probe(struct i2c_client *client,
 	}
 
 	info_flicker("probe successfully");
+
+	stk_power_ctrl(alps_data, false);
 	return 0;
 err_setup_input_device:
 err_als_input_allocate:

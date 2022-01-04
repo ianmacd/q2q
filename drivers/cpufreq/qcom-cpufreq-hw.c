@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2018-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/bitfield.h>
@@ -37,6 +37,7 @@
 #define GT_IRQ_STATUS			BIT(2)
 #define MAX_FN_SIZE			20
 #define LIMITS_POLLING_DELAY_MS		10
+#define MAX_ROW				2
 
 #define CYCLE_CNTR_OFFSET(c, m, acc_count)				\
 			(acc_count ? ((c - cpumask_first(m) + 1) * 4) : 0)
@@ -66,6 +67,8 @@ struct cpufreq_qcom {
 	struct cpufreq_frequency_table *table;
 	void __iomem *base;
 	void __iomem *pdmem_base;
+	void __iomem **sdpm_base;
+	int sdpm_base_count;
 	cpumask_t related_cpus;
 	unsigned long dcvsh_freq_limit;
 	struct delayed_work freq_poll_work;
@@ -275,22 +278,28 @@ static int
 qcom_cpufreq_hw_target_index(struct cpufreq_policy *policy,
 			     unsigned int index)
 {
-	struct cpufreq_qcom *c;
+	struct cpufreq_qcom *c = qcom_freq_domain_map[policy->cpu];
+	unsigned long freq = policy->freq_table[index].frequency;
+	int i;
 
 	if (perf_lock_support) {
-		c = qcom_freq_domain_map[policy->cpu];
 		if (c->pdmem_base)
 			writel_relaxed(index, c->pdmem_base);
 	}
 
-	writel_relaxed(index, policy->driver_data + offsets[REG_PERF_STATE]);
+	for (i = 0; i < c->sdpm_base_count && freq > policy->cur; i++)
+		writel_relaxed(freq / 1000, c->sdpm_base[i]);
+
 #if IS_ENABLED(CONFIG_SEC_DEBUG_APPS_CLK_LOGGING)
 	sec_smem_clk_osm_add_log_cpufreq(policy->cpu,
 				policy->freq_table[index].frequency, policy->kobj.name);
 #endif
-	arch_set_freq_scale(policy->related_cpus,
-			    policy->freq_table[index].frequency,
+	writel_relaxed(index, policy->driver_data + offsets[REG_PERF_STATE]);
+	arch_set_freq_scale(policy->related_cpus, freq,
 			    policy->cpuinfo.max_freq);
+
+	for (i = 0; i < c->sdpm_base_count && freq < policy->cur; i++)
+		writel_relaxed(freq / 1000, c->sdpm_base[i]);
 
 	return 0;
 }
@@ -377,6 +386,8 @@ static int qcom_cpufreq_hw_cpu_init(struct cpufreq_policy *policy)
 		c->is_irq_requested = true;
 		writel_relaxed(0x0, c->base + offsets[REG_INTR_CLR]);
 		c->is_irq_enabled = true;
+
+		sysfs_attr_init(&c->freq_limit_attr.attr);
 		c->freq_limit_attr.attr.name = "dcvsh_freq_limit";
 		c->freq_limit_attr.show = dcvsh_freq_limit_show;
 		c->freq_limit_attr.attr.mode = 0444;
@@ -422,6 +433,30 @@ static void qcom_cpufreq_ready(struct cpufreq_policy *policy)
 	of_node_put(np);
 }
 
+static int qcom_cpufreq_hw_suspend(struct cpufreq_policy *policy)
+{
+	struct cpufreq_qcom *c = qcom_freq_domain_map[policy->cpu];
+	unsigned long freq = policy->freq_table[0].frequency;
+	int i;
+
+	for (i = 0; i < c->sdpm_base_count && freq < policy->cur; i++)
+		writel_relaxed(freq / 1000, c->sdpm_base[i]);
+
+	return 0;
+}
+
+static int qcom_cpufreq_hw_resume(struct cpufreq_policy *policy)
+{
+	struct cpufreq_qcom *c = qcom_freq_domain_map[policy->cpu];
+	unsigned long freq = policy->cur;
+	int i;
+
+	for (i = 0; i < c->sdpm_base_count; i++)
+		writel_relaxed(freq / 1000, c->sdpm_base[i]);
+
+	return 0;
+}
+
 static struct cpufreq_driver cpufreq_qcom_hw_driver = {
 	.flags		= CPUFREQ_STICKY | CPUFREQ_NEED_INITIAL_FREQ_CHECK |
 			  CPUFREQ_HAVE_GOVERNOR_PER_POLICY,
@@ -434,6 +469,8 @@ static struct cpufreq_driver cpufreq_qcom_hw_driver = {
 	.attr		= qcom_cpufreq_hw_attr,
 	.boost_enabled	= true,
 	.ready		= qcom_cpufreq_ready,
+	.suspend	= qcom_cpufreq_hw_suspend,
+	.resume		= qcom_cpufreq_hw_resume,
 };
 
 static int qcom_cpufreq_hw_read_lut(struct platform_device *pdev,
@@ -529,7 +566,8 @@ static int qcom_cpu_resources_init(struct platform_device *pdev,
 	struct device *dev = &pdev->dev;
 	void __iomem *base;
 	char pdmem_name[MAX_FN_SIZE] = {};
-	int ret, cpu_r;
+	char sdpm_name[MAX_FN_SIZE] = {};
+	int ret, cpu_r, len, reg, size, i, j;
 
 	c = devm_kzalloc(dev, sizeof(*c), GFP_KERNEL);
 	if (!c)
@@ -584,6 +622,31 @@ static int qcom_cpu_resources_init(struct platform_device *pdev,
 			dev_err(dev, "Failed to map PDMEM domain-%d\n", index);
 		else
 			c->pdmem_base = base;
+	}
+
+	snprintf(sdpm_name, sizeof(sdpm_name), "qcom,sdpm-cx-mx-%d", index);
+	len = of_property_count_u32_elems(dev->of_node, sdpm_name);
+	if (len > 0) {
+		c->sdpm_base_count = len / MAX_ROW;
+		c->sdpm_base = devm_kcalloc(dev, c->sdpm_base_count,
+					sizeof(*c->sdpm_base), GFP_KERNEL);
+		if (!c->sdpm_base)
+			return -ENOMEM;
+
+		for (i = 0, j = 0; i < c->sdpm_base_count; i++, j += 2) {
+			of_property_read_u32_index(dev->of_node, sdpm_name,
+								j, &reg);
+			of_property_read_u32_index(dev->of_node, sdpm_name,
+								j + 1, &size);
+			base = devm_ioremap(dev, reg, size);
+			if (IS_ERR(base)) {
+				dev_err(dev, "Failed to map base %d domain-%d\n",
+						i, index);
+				return PTR_ERR(base);
+			}
+
+			c->sdpm_base[i] = base;
+		}
 	}
 
 	if (of_find_property(dev->of_node, "interrupts", NULL)) {

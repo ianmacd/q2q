@@ -44,10 +44,14 @@ int f2fs_check_nid_range(struct f2fs_sb_info *sbi, nid_t nid)
 bool f2fs_available_free_memory(struct f2fs_sb_info *sbi, int type)
 {
 	struct f2fs_nm_info *nm_i = NM_I(sbi);
+	struct discard_cmd_control *dcc = SM_I(sbi)->dcc_info;
 	struct sysinfo val;
 	unsigned long avail_ram;
 	unsigned long mem_size = 0;
 	bool res = false;
+
+	if (!nm_i)
+		return true;
 
 	si_meminfo(&val);
 
@@ -91,6 +95,10 @@ bool f2fs_available_free_memory(struct f2fs_sb_info *sbi, int type)
 		/* it allows 50% / total_ram for inmemory pages */
 		mem_size = get_pages(sbi, F2FS_INMEM_PAGES);
 		res = mem_size < (val.totalram / 2);
+	} else if (type == DISCARD_CACHE) {
+		mem_size = (atomic_read(&dcc->discard_cmd_cnt) *
+				sizeof(struct discard_cmd)) >> PAGE_SHIFT;
+		res = mem_size < (avail_ram * nm_i->ram_thresh / 100);
 	} else {
 		if (!sbi->sb->s_bdi->wb.dirty_exceeded)
 			return true;
@@ -110,7 +118,7 @@ static void clear_node_page_dirty(struct page *page)
 
 static struct page *get_current_nat_page(struct f2fs_sb_info *sbi, nid_t nid)
 {
-	return f2fs_get_meta_page(sbi, current_nat_addr(sbi, nid));
+	return f2fs_get_meta_page_retry(sbi, current_nat_addr(sbi, nid));
 }
 
 static struct page *get_next_nat_page(struct f2fs_sb_info *sbi, nid_t nid)
@@ -539,9 +547,9 @@ int __f2fs_get_node_info(struct f2fs_sb_info *sbi, nid_t nid,
 		return 0;
 	}
 
-	//readahead && cp_mutex locked?
+	//readahead && cp_global_sem locked?
 	if (unlikely((op_flags & REQ_RAHEAD) &&
-				mutex_is_locked(&sbi->cp_mutex))) {
+				rwsem_is_locked(&sbi->cp_global_sem))) {
 		up_read(&nm_i->nat_tree_lock);
 		return -EBUSY;
 	}
@@ -718,6 +726,21 @@ got:
 	return level;
 }
 
+#ifdef CONFIG_F2FS_SEC_SUPPORT_DNODE_RELOCATION
+/* It should grab and release a write lock by self when it needs */
+static void __lock_dnode(struct dnode_of_data *dn, bool lock)
+{
+	if (!dn->for_dnode_relocation) {
+		if (lock)
+			down_read(&F2FS_I(dn->inode)->i_dnode_sem);
+		else
+			up_read(&F2FS_I(dn->inode)->i_dnode_sem);
+	}
+}
+#else
+static void __lock_dnode(struct dnode_of_data *dn, bool lock) {}
+#endif
+
 /*
  * Caller should call f2fs_put_dnode(dn).
  * Also, it should grab and release a rwsem by calling f2fs_lock_op() and
@@ -734,17 +757,22 @@ int f2fs_get_dnode_of_data(struct dnode_of_data *dn, pgoff_t index, int mode)
 	int level, i = 0;
 	int err = 0;
 
+	__lock_dnode(dn, true);
 	level = get_node_path(dn->inode, index, offset, noffset);
-	if (level < 0)
+	if (level < 0) {
+		__lock_dnode(dn, false);
 		return level;
+	}
 
 	nids[0] = dn->inode->i_ino;
 	npage[0] = dn->inode_page;
 
 	if (!npage[0]) {
 		npage[0] = f2fs_get_node_page(sbi, nids[0]);
-		if (IS_ERR(npage[0]))
+		if (IS_ERR(npage[0])) {
+			__lock_dnode(dn, false);
 			return PTR_ERR(npage[0]);
+		}
 	}
 
 	/* if inline_data is set, should not report any block indices */
@@ -814,6 +842,7 @@ int f2fs_get_dnode_of_data(struct dnode_of_data *dn, pgoff_t index, int mode)
 	dn->ofs_in_node = offset[level];
 	dn->node_page = npage[level];
 	dn->data_blkaddr = f2fs_data_blkaddr(dn);
+	__lock_dnode(dn, false);
 	return 0;
 
 release_pages:
@@ -828,6 +857,7 @@ release_out:
 		dn->max_level = level;
 		dn->ofs_in_node = offset[level];
 	}
+	__lock_dnode(dn, false);
 	return err;
 }
 
@@ -2433,6 +2463,9 @@ static int __f2fs_build_free_nids(struct f2fs_sb_info *sbi,
 	if (unlikely(nid >= nm_i->max_nid))
 		nid = 0;
 
+	if (unlikely(nid % NAT_ENTRY_PER_BLOCK))
+		nid = NAT_BLOCK_OFFSET(nid) * NAT_ENTRY_PER_BLOCK;
+
 	/* Enough entries */
 	if (nm_i->nid_cnt[FREE_NID] >= NAT_ENTRY_PER_BLOCK)
 		return 0;
@@ -2659,7 +2692,7 @@ int f2fs_try_to_free_nids(struct f2fs_sb_info *sbi, int nr_shrink)
 	return nr - nr_shrink;
 }
 
-void f2fs_recover_inline_xattr(struct inode *inode, struct page *page)
+int f2fs_recover_inline_xattr(struct inode *inode, struct page *page)
 {
 	void *src_addr, *dst_addr;
 	size_t inline_size;
@@ -2667,7 +2700,8 @@ void f2fs_recover_inline_xattr(struct inode *inode, struct page *page)
 	struct f2fs_inode *ri;
 
 	ipage = f2fs_get_node_page(F2FS_I_SB(inode), inode->i_ino);
-	f2fs_bug_on(F2FS_I_SB(inode), IS_ERR(ipage));
+	if (IS_ERR(ipage))
+		return PTR_ERR(ipage);
 
 	ri = F2FS_INODE(page);
 	if (ri->i_inline & F2FS_INLINE_XATTR) {
@@ -2686,6 +2720,7 @@ void f2fs_recover_inline_xattr(struct inode *inode, struct page *page)
 update_inode:
 	f2fs_update_inode(inode, ipage);
 	f2fs_put_page(ipage, 1);
+	return 0;
 }
 
 int f2fs_recover_xattr_data(struct inode *inode, struct page *page)

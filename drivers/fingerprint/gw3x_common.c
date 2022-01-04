@@ -41,7 +41,7 @@ static ssize_t gw3x_bfs_values_show(struct device *dev,
 	struct gf_device *gf_dev = dev_get_drvdata(dev);
 
 	return snprintf(buf, PAGE_SIZE, "\"FP_SPICLK\":\"%d\"\n",
-			gf_dev->spi->max_speed_hz);
+			gf_dev->clk_setting->spi_speed);
 }
 
 static ssize_t gw3x_type_check_show(struct device *dev,

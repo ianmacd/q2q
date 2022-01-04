@@ -223,6 +223,10 @@ void max77705_notify_dr_status(struct max77705_usbc_platform_data *usbpd_data, u
 			pr_info("%s: blocked by WATER\n", __func__);
 			return;
 		}
+		if (usbpd_data->shut_down) {
+			pr_info("%s: blocked by shutdown\n", __func__);
+			return;
+		}
 		if (pd_data->current_dr == UFP) {
 			if (usbpd_data->is_host == HOST_ON) {
 				msg_maxim("pd_state:%02d,	turn off host",

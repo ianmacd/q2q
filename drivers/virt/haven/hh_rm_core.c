@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021, The Linux Foundation. All rights reserved.
  *
  */
 
@@ -485,7 +485,7 @@ static int hh_rm_send_request(u32 message_id,
 	const void *req_buff_curr = req_buff;
 	struct hh_rm_rpc_hdr *hdr;
 	unsigned long tx_flags;
-	u8 num_fragments = 0;
+	u32 num_fragments = 0;
 	size_t payload_size;
 	void *send_buff;
 	int i, ret;
@@ -804,6 +804,10 @@ int hh_rm_populate_hyp_res(hh_vmid_t vmid)
 			case HH_RM_RES_TYPE_DB_RX:
 				ret = hh_dbl_populate_cap_info(label, cap_id,
 					HH_MSGQ_DIRECTION_RX, linux_irq);
+				break;
+			case HH_RM_RES_TYPE_VPMGRP:
+				ret = hh_vpm_grp_populate_info(cap_id,
+								linux_irq);
 				break;
 			default:
 				pr_err("%s: Unknown resource type: %u\n",

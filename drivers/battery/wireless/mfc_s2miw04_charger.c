@@ -112,11 +112,11 @@ static char *mfc_vout_control_mode_str[] = {
 	"Set Vout 11V",
 	"Set Vout 12V",
 	"Set Vout 12.5V",
+	"Set Vout 4.5V Step",
 	"Set Vout 5V Step",
 	"Set Vout 5.5V Step",
 	"Set Vout 9V Step",
 	"Set Vout 10V Step",
-	"Set Vout 4.5V Step",
 };
 
 static char *rx_vout_str[] = {
@@ -3443,7 +3443,7 @@ static void mfc_wpc_det_work(struct work_struct *work)
 					POWER_SUPPLY_PROP_ONLINE, value);
 			} else {
 				/* send request afc_tx , request afc is mandatory */
-				msleep(200);
+				msleep(charger->req_afc_delay);
 				mfc_send_command(charger, MFC_REQUEST_AFC_TX);
 			}
 		}
@@ -3474,6 +3474,7 @@ static void mfc_wpc_det_work(struct work_struct *work)
 		charger->wc_ldo_status = MFC_LDO_ON;
 		charger->tx_id_done = false;
 		charger->req_tx_id = false;
+		charger->req_afc_delay = REQ_AFC_DLY;
 		charger->is_abnormal_pad = false;
 		value.intval = charger->is_abnormal_pad;
 		psy_do_property("wireless", set,
@@ -4114,13 +4115,10 @@ static void mfc_check_sys_op_mode(struct mfc_charger_data *charger, u8 mode)
 			pr_info("%s: TX entered PHM but no PHM disable 3min timer\n", __func__);
 		}
 #if defined(CONFIG_TX_GEAR_PHM_VOUT_CTRL)
-		if (charger->pdata->phm_vout_ctrl_dev & SEC_WIRELESS_PHM_VOUT_CTRL_GEAR ||
-			charger->pdata->phm_vout_ctrl_dev & SEC_WIRELESS_PHM_VOUT_CTRL_BUDS) {
-			charger->tx_device_phm = 1;
-			value.intval = 1;
-			psy_do_property("wireless", set,
-				POWER_SUPPLY_EXT_PROP_GEAR_PHM_EVENT, value);
-		}
+		charger->tx_device_phm = 1;
+		value.intval = 1;
+		psy_do_property("wireless", set,
+			POWER_SUPPLY_EXT_PROP_GEAR_PHM_EVENT, value);
 #endif
 	} else {
 #if defined(CONFIG_TX_GEAR_PHM_VOUT_CTRL)
@@ -4233,13 +4231,13 @@ static irqreturn_t mfc_wpc_irq_thread(int irq, void *irq_data)
 		pr_info("%s: TX RECEIVED IRQ !\n", __func__);
 		if (charger->wc_tx_enable && !delayed_work_pending(&charger->wpc_tx_isr_work)) {
 			__pm_stay_awake(charger->wpc_tx_ws);
-			queue_delayed_work(charger->wqueue, &charger->wpc_tx_isr_work, msecs_to_jiffies(1000));
+			queue_delayed_work(charger->wqueue, &charger->wpc_tx_isr_work, 0);
 		} else if (charger->pdata->cable_type == SEC_BATTERY_CABLE_WIRELESS_STAND ||
 			charger->pdata->cable_type == SEC_BATTERY_CABLE_WIRELESS_HV_STAND) {
 			pr_info("%s: Don't run ISR_WORK for NO ACK !\n", __func__);
 		} else if (!delayed_work_pending(&charger->wpc_isr_work)) {
 			__pm_stay_awake(charger->wpc_rx_ws);
-			queue_delayed_work(charger->wqueue, &charger->wpc_isr_work, msecs_to_jiffies(500));
+			queue_delayed_work(charger->wqueue, &charger->wpc_isr_work, 0);
 		}
 	}
 
@@ -4879,11 +4877,31 @@ static int mfc_s2miw04_charger_probe(
 	charger->req_tx_id = false;
 	charger->is_abnormal_pad = false;
 	charger->sleep_mode = false;
+	charger->req_afc_delay = REQ_AFC_DLY;
 	init_waitqueue_head(&charger->suspend_wait);
 
 	mutex_init(&charger->io_lock);
 	mutex_init(&charger->wpc_en_lock);
 	mutex_init(&charger->fw_lock);
+
+	charger->wqueue = create_singlethread_workqueue("mfc_workqueue");
+	if (!charger->wqueue) {
+		pr_err("%s: Fail to Create Workqueue\n", __func__);
+		goto err_pdata_free;
+	}
+
+	charger->wpc_ws = wakeup_source_register(&client->dev, "wpc_ws");
+	charger->wpc_rx_ws = wakeup_source_register(&client->dev, "wpc_rx_ws");
+	charger->wpc_tx_ws = wakeup_source_register(&client->dev, "wpc_tx_ws");
+	charger->wpc_update_ws = wakeup_source_register(&client->dev, "wpc_update_ws");
+	charger->wpc_opfq_ws = wakeup_source_register(&client->dev, "wpc_opfq_ws");
+	charger->wpc_tx_duty_min_ws = wakeup_source_register(&client->dev, "wpc_tx_duty_min_ws");
+	charger->wpc_afc_vout_ws = wakeup_source_register(&client->dev, "wpc_afc_vout_ws");
+	charger->wpc_vout_mode_ws = wakeup_source_register(&client->dev, "wpc_vout_mode_ws");
+	charger->wpc_rx_det_ws = wakeup_source_register(&client->dev, "wpc_rx_det_ws");
+	charger->wpc_tx_phm_ws = wakeup_source_register(&client->dev, "wpc_tx_phm_ws");
+	charger->wpc_tx_id_ws = wakeup_source_register(&client->dev, "wpc_tx_id_ws");
+	charger->wpc_pdrc_ws = wakeup_source_register(&client->dev, "wpc_pdrc_ws");
 
 	/* wpc_det */
 	if (charger->pdata->irq_wpc_det) {
@@ -4928,25 +4946,6 @@ static int mfc_s2miw04_charger_probe(
 		pr_err("%s: Failed to Register psy_chg(%d)\n", __func__, ret);
 		goto err_supply_unreg;
 	}
-
-	charger->wqueue = create_singlethread_workqueue("mfc_workqueue");
-	if (!charger->wqueue) {
-		pr_err("%s: Fail to Create Workqueue\n", __func__);
-		goto err_pdata_free;
-	}
-
-	charger->wpc_ws = wakeup_source_register(&client->dev, "wpc_ws");
-	charger->wpc_rx_ws = wakeup_source_register(&client->dev, "wpc_rx_ws");
-	charger->wpc_tx_ws = wakeup_source_register(&client->dev, "wpc_tx_ws");
-	charger->wpc_update_ws = wakeup_source_register(&client->dev, "wpc_update_ws");
-	charger->wpc_opfq_ws = wakeup_source_register(&client->dev, "wpc_opfq_ws");
-	charger->wpc_tx_duty_min_ws = wakeup_source_register(&client->dev, "wpc_tx_duty_min_ws");
-	charger->wpc_afc_vout_ws = wakeup_source_register(&client->dev, "wpc_afc_vout_ws");
-	charger->wpc_vout_mode_ws = wakeup_source_register(&client->dev, "wpc_vout_mode_ws");
-	charger->wpc_rx_det_ws = wakeup_source_register(&client->dev, "wpc_rx_det_ws");
-	charger->wpc_tx_phm_ws = wakeup_source_register(&client->dev, "wpc_tx_phm_ws");
-	charger->wpc_tx_id_ws = wakeup_source_register(&client->dev, "wpc_tx_id_ws");
-	charger->wpc_pdrc_ws = wakeup_source_register(&client->dev, "wpc_pdrc_ws");
 
 	ret = mfc_create_attrs(&charger->psy_chg->dev);
 	if (ret) {
@@ -5013,6 +5012,7 @@ static int mfc_s2miw04_charger_probe(
 			pr_info("%s: updated input current (%d)\n",
 				__func__, charger->input_current);
 		}
+		charger->req_afc_delay = 0;
 		queue_delayed_work(charger->wqueue, &charger->wpc_det_work, 0);
 	}
 
@@ -5020,6 +5020,8 @@ static int mfc_s2miw04_charger_probe(
 	return 0;
 
 err_irq_wpc_det:
+	power_supply_unregister(charger->psy_chg);
+err_supply_unreg:
 	wakeup_source_unregister(charger->wpc_ws);
 	wakeup_source_unregister(charger->wpc_rx_ws);
 	wakeup_source_unregister(charger->wpc_tx_ws);
@@ -5033,8 +5035,6 @@ err_irq_wpc_det:
 	wakeup_source_unregister(charger->wpc_tx_id_ws);
 	wakeup_source_unregister(charger->wpc_pdrc_ws);
 err_pdata_free:
-	power_supply_unregister(charger->psy_chg);
-err_supply_unreg:
 	mutex_destroy(&charger->io_lock);
 	mutex_destroy(&charger->wpc_en_lock);
 	mutex_destroy(&charger->fw_lock);

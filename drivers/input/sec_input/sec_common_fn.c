@@ -59,7 +59,7 @@ int sec_input_get_lcd_id(struct device *dev)
 #if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
 	lcdtype = get_lcd_attached("GET");
 	if (lcdtype == 0xFFFFFF) {
-		input_err(true, dev, "%s: lcd is not attached\n", __func__);
+		input_err(true, dev, "%s: lcd is not attached(GET)\n", __func__);
 		return -ENODEV;
 	}
 #endif
@@ -67,12 +67,12 @@ int sec_input_get_lcd_id(struct device *dev)
 #if IS_ENABLED(CONFIG_EXYNOS_DPU30) || IS_ENABLED(CONFIG_MCD_PANEL)
 	connected = get_lcd_info("connected");
 	if (connected < 0) {
-		input_err(true, dev, "%s: Failed to get lcd info\n", __func__);
+		input_err(true, dev, "%s: Failed to get lcd info(connected)\n", __func__);
 		return -EINVAL;
 	}
 
 	if (!connected) {
-		input_err(true, dev, "%s: lcd is disconnected\n", __func__);
+		input_err(true, dev, "%s: lcd is disconnected(connected)\n", __func__);
 		return -ENODEV;
 	}
 
@@ -80,22 +80,22 @@ int sec_input_get_lcd_id(struct device *dev)
 
 	lcdtype = get_lcd_info("id");
 	if (lcdtype < 0) {
-		input_err(true, dev, "%s: Failed to get lcd info\n", __func__);
+		input_err(true, dev, "%s: Failed to get lcd info(id)\n", __func__);
 		return -EINVAL;
 	}
 #endif
 #if IS_ENABLED(CONFIG_SMCDSD_PANEL)
 	if (!lcdtype) {
-		input_err(true, dev, "%s: lcd is disconnected\n", __func__);
+		input_err(true, dev, "%s: lcd is disconnected(lcdtype)\n", __func__);
 		return -ENODEV;
 	}
 #endif
 
 	lcd_id_param = sec_input_lcd_parse_panel_id();
-	if (lcdtype == 0 && lcd_id_param != 0) {
+	if (lcdtype <= 0 && lcd_id_param != 0) {
 		lcdtype = lcd_id_param;
 		if (lcdtype == 0xFFFFFF) {
-			input_err(true, dev, "%s: lcd is not attached\n", __func__);
+			input_err(true, dev, "%s: lcd is not attached(PARAM)\n", __func__);
 			return -ENODEV;
 		}
 	}
@@ -285,6 +285,7 @@ int sec_input_check_cover_type(struct device *dev)
 	case SEC_TS_CLEAR_SIDE_VIEW_COVER:
 	case SEC_TS_MINI_SVIEW_WALLET_COVER:
 	case SEC_TS_MONTBLANC_COVER:
+	case SEC_TS_CLEAR_CAMERA_VIEW_COVER:
 		cover_cmd = pdata->cover_type;
 		break;
 	default:
@@ -830,6 +831,7 @@ static void sec_input_set_prop(struct device *dev, struct input_dev *input_dev, 
 
 	set_bit(propbit, input_dev->propbit);
 	set_bit(KEY_WAKEUP, input_dev->keybit);
+	set_bit(KEY_WATCH, input_dev->keybit);
 
 	input_set_abs_params(input_dev, ABS_MT_POSITION_X, 0, pdata->max_x, 0, 0);
 	input_set_abs_params(input_dev, ABS_MT_POSITION_Y, 0, pdata->max_y, 0, 0);
@@ -1059,10 +1061,16 @@ int sec_input_parse_dt(struct device *dev)
 		return -EINVAL;
 	}
 
+	if (of_property_read_u32(np, "sec,irq_flag", &pdata->irq_flag))
+		pdata->irq_flag = IRQF_TRIGGER_LOW | IRQF_ONESHOT;
+
+	input_dbg(true, dev, "%s: irq_flag property 0x%X\n", __func__, pdata->irq_flag);
+
 	pdata->gpio_spi_cs = of_get_named_gpio(np, "sec,gpio_spi_cs", 0);
 	if (gpio_is_valid(pdata->gpio_spi_cs)) {
 		ret = gpio_request(pdata->gpio_spi_cs, "tsp,gpio_spi_cs");
 		input_info(true, dev, "%s: gpio_spi_cs: %d, ret: %d\n", __func__, pdata->gpio_spi_cs, ret);
+		ret = 0;
 	}
 
 	if (of_property_read_u32(np, "sec,i2c-burstmax", &pdata->i2c_burstmax)) {
@@ -1140,16 +1148,19 @@ int sec_input_parse_dt(struct device *dev)
 		}
 	}
 
-	pdata->dvdd = regulator_get(dev, "tsp_io_ldo");
-	if (IS_ERR_OR_NULL(pdata->dvdd)) {
-		input_err(true, dev, "%s: Failed to get %s regulator.\n",
-				__func__, "tsp_io_ldo");
-		ret = PTR_ERR(pdata->dvdd);
+	pdata->not_support_io_ldo = of_property_read_bool(np, "not_support_io_ldo");
+	if (!pdata->not_support_io_ldo) {
+		pdata->dvdd = regulator_get(dev, "tsp_io_ldo");
+		if (IS_ERR_OR_NULL(pdata->dvdd)) {
+			input_err(true, dev, "%s: Failed to get %s regulator.\n",
+					__func__, "tsp_io_ldo");
+			ret = PTR_ERR(pdata->dvdd);
 #if !IS_ENABLED(CONFIG_QGKI)
-		if (gpio_is_valid(pdata->gpio_spi_cs))
-			gpio_free(pdata->gpio_spi_cs);
+			if (gpio_is_valid(pdata->gpio_spi_cs))
+				gpio_free(pdata->gpio_spi_cs);
 #endif
-		return -EINVAL;
+			return -EINVAL;
+		}
 	}
 
 	pdata->avdd = regulator_get(dev, "tsp_avdd_ldo");
@@ -1170,6 +1181,7 @@ int sec_input_parse_dt(struct device *dev)
 	pdata->support_fod_lp_mode = of_property_read_bool(np, "support_fod_lp_mode");
 	pdata->enable_settings_aot = of_property_read_bool(np, "enable_settings_aot");
 	pdata->sync_reportrate_120 = of_property_read_bool(np, "sync-reportrate-120");
+	pdata->support_refresh_rate_mode = of_property_read_bool(np, "support_refresh_rate_mode");
 	pdata->support_vrr = of_property_read_bool(np, "support_vrr");
 	pdata->support_ear_detect = of_property_read_bool(np, "support_ear_detect_mode");
 	pdata->support_open_short_test = of_property_read_bool(np, "support_open_short_test");
@@ -1179,14 +1191,23 @@ int sec_input_parse_dt(struct device *dev)
 	pdata->chip_on_board = of_property_read_bool(np, "chip_on_board");
 	pdata->disable_vsync_scan = of_property_read_bool(np, "disable_vsync_scan");
 	pdata->unuse_dvdd_power = of_property_read_bool(np, "sec,unuse_dvdd_power");
+	pdata->sense_off_when_cover_closed = of_property_read_bool(np, "sense_off_when_cover_closed");
 	of_property_read_u32(np, "support_rawdata_map_num", &pdata->support_rawdata_map_num);
 
 	if (of_property_read_u32(np, "sec,support_dual_foldable", &pdata->support_dual_foldable) < 0)
 		pdata->support_dual_foldable = 0;
 	if (of_property_read_u32(np, "sec,support_sensor_hall", &pdata->support_sensor_hall) < 0)
 		pdata->support_sensor_hall = 0;
+	if (of_property_read_u32(np, "sec,dump_ic_ver", &pdata->dump_ic_ver) < 0)
+		pdata->dump_ic_ver = 0;
 	pdata->support_flex_mode = of_property_read_bool(np, "support_flex_mode");
 	pdata->support_lightsensor_detect = of_property_read_bool(np, "support_lightsensor_detect");
+
+	pdata->enable_sysinput_enabled = of_property_read_bool(np, "sec,enable_sysinput_enabled");
+	pdata->not_support_lcd_doze = of_property_read_bool(np, "sec,not_support_lcd_doze");
+	input_info(true, dev, "%s: Sysinput enabled %s, LCD DOZE %ssupported\n",
+				__func__, pdata->enable_sysinput_enabled ? "ON" : "OFF",
+				pdata->not_support_lcd_doze ? "NOT " : "");
 
 	if (of_property_read_u32_array(np, "sec,area-size", px_zone, 3)) {
 		input_info(true, dev, "Failed to get zone's size\n");
@@ -1210,7 +1231,7 @@ int sec_input_parse_dt(struct device *dev)
 #endif
 	input_err(true, dev, "%s: i2c buffer limit: %d, lcd_id:%06X, bringup:%d,"
 			" id:%d,%d, dex:%d, max(%d/%d), FOD:%d, AOT:%d, ED:%d, FLM:%d,"
-			" COB:%d, disable_vsync_scan:%d unuse_dvdd_power:%d\n",
+			" COB:%d, disable_vsync_scan:%d, unuse_dvdd_power:%d\n",
 			__func__, pdata->i2c_burstmax, lcd_type, pdata->bringup,
 			pdata->tsp_id, pdata->tsp_icid,
 			pdata->support_dex, pdata->max_x, pdata->max_y,
@@ -1303,8 +1324,7 @@ int stui_tsp_type(void)
 }
 EXPORT_SYMBOL(stui_tsp_type);
 
-
-static int sec_input_enable_device(struct input_dev *dev)
+int sec_input_enable_device(struct input_dev *dev)
 {
 	int retval;
 
@@ -1319,8 +1339,9 @@ static int sec_input_enable_device(struct input_dev *dev)
 
 	return retval;
 }
+EXPORT_SYMBOL(sec_input_enable_device);
 
-static int sec_input_disable_device(struct input_dev *dev)
+int sec_input_disable_device(struct input_dev *dev)
 {
 	int retval;
 
@@ -1334,17 +1355,14 @@ static int sec_input_disable_device(struct input_dev *dev)
 	mutex_unlock(&dev->mutex);
 	return 0;
 }
+EXPORT_SYMBOL(sec_input_disable_device);
 
 __visible_for_testing ssize_t sec_input_enabled_show(struct device *dev,
 					 struct device_attribute *attr,
 					 char *buf)
 {
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
-	struct sec_ts_plat_data *pdata = ptsp->platform_data;
-#else
 	struct input_dev *input_dev = to_input_dev(dev);
 	struct sec_ts_plat_data *pdata = input_dev->dev.parent->platform_data;
-#endif
 
 	return scnprintf(buf, PAGE_SIZE, "%d\n", pdata->enabled);
 }
@@ -1355,13 +1373,8 @@ __visible_for_testing ssize_t sec_input_enabled_store(struct device *dev,
 {
 	int ret;
 	bool enable;
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
-	struct sec_ts_plat_data *pdata = ptsp->platform_data;
-	struct input_dev *input_dev = pdata->input_dev;
-#else
 	struct input_dev *input_dev = to_input_dev(dev);
 	struct sec_ts_plat_data *pdata = input_dev->dev.parent->platform_data;
-#endif
 
 	ret = strtobool(buf, &enable);
 	if (ret)

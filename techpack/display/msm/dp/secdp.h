@@ -495,7 +495,7 @@ void secdp_dex_adapter_skip_store(bool skip);
 
 bool secdp_panel_hdr_supported(void);
 
-#ifdef CONFIG_SEC_DISPLAYPORT_ENG
+#if defined(CONFIG_SEC_DISPLAYPORT_ENG)
 enum secdp_hw_preshoot_t {
 	DP_HW_PRESHOOT_0,
 	DP_HW_PRESHOOT_1,

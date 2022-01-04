@@ -1062,8 +1062,10 @@ static struct pca953x_platform_data *of_pca953x_parse_dt(struct device *dev)
 		goto err_parsing_dt;
 	}
 
+#ifdef CONFIG_GPIO_PCA953X_IRQ
 	pdata->irq_gpio = of_get_named_gpio(np, "pca953x,irq-gpio", 0);
 	pr_info("%s: irq-gpio: %u\n", __func__, pdata->irq_gpio);
+#endif
 
 	ret = of_property_read_u32(np, "pca953x,gpio_start", &temp);
 	if (ret) {
@@ -1204,9 +1206,10 @@ static int pca953x_probe(struct i2c_client *client,
 	if (ret)
 		goto err_exit;
 
+#ifdef CONFIG_GPIO_PCA953X_IRQ
 	if (pdata)
 		client->irq = gpio_to_irq(pdata->irq_gpio);
-
+#endif
 	ret = pca953x_irq_setup(chip, irq_base);
 	if (ret)
 		goto err_exit;
@@ -1260,8 +1263,9 @@ static int pca953x_probe(struct i2c_client *client,
 
 	i2c_set_clientdata(client, chip);
 
+#ifdef CONFIG_GPIO_PCA953X_IRQ
 	irq_set_irq_wake(client->irq, 1);
-
+#endif
 	pr_info("[%s done]\n", __func__);
 
 	return 0;

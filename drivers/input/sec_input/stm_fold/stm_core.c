@@ -344,7 +344,8 @@ int stm_ts_i2c_write(struct stm_ts_data *ts, u8 *reg, int cnum, u8 *data, int le
 			ts->plat_data->hw_param.comm_err_count++;
 
 			snprintf(result, sizeof(result), "RESULT=I2C");
-			sec_cmd_send_event_to_user(&ts->sec, NULL, result);
+			if (ts->probe_done)
+				sec_cmd_send_event_to_user(&ts->sec, NULL, result);
 		}
 	}
 
@@ -451,7 +452,8 @@ int stm_ts_i2c_read(struct stm_ts_data *ts, u8 *reg, int cnum, u8 *data, int len
 				ts->plat_data->hw_param.comm_err_count++;
 
 				snprintf(result, sizeof(result), "RESULT=I2C");
-				sec_cmd_send_event_to_user(&ts->sec, NULL, result);
+				if (ts->probe_done)
+					sec_cmd_send_event_to_user(&ts->sec, NULL, result);
 			}
 		}
 	} else {
@@ -721,6 +723,12 @@ static void stm_ts_gesture_event(struct stm_ts_data *ts, u8 *event_buff)
 			input_report_key(ts->plat_data->input_dev, BTN_LARGE_PALM, 0);
 		else
 			input_report_key(ts->plat_data->input_dev, BTN_LARGE_PALM, 1);
+		input_sync(ts->plat_data->input_dev);
+	} else if (p_gesture_status->stype  == STM_TS_SPONGE_EVENT_TWO_FINGER_DOUBLETAP) {
+		input_info(true, &ts->client->dev, "%s: TWO FINGER DOUBLETAP\n", __func__);
+		input_report_key(ts->plat_data->input_dev, KEY_WATCH, 1);
+		input_sync(ts->plat_data->input_dev);
+		input_report_key(ts->plat_data->input_dev, KEY_WATCH, 0);
 		input_sync(ts->plat_data->input_dev);
 	}
 }

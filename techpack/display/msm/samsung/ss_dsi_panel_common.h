@@ -120,13 +120,14 @@ extern bool enable_pr_debug;
 
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
 /* Too much log causes kunit test app crash */
-#define LCD_INFO(V, X, ...) pr_debug("[SDE_%d] %s : "X, V ? V->ndx : 0, __func__, ## __VA_ARGS__)
+#define LCD_INFO(V, X, ...) pr_debug("[%d.%d][SDE_%d] %s : "X, ktime_to_ms(ktime_get())/1000, ktime_to_ms(ktime_get())%1000, V ? V->ndx : 0, __func__, ## __VA_ARGS__)
+#define LCD_INFO_ONCE(V, X, ...) pr_info_once("[%d.%d][SDE_%d] %s : "X, ktime_to_ms(ktime_get())/1000, ktime_to_ms(ktime_get())%1000, V ? V->ndx : 0, __func__, ## __VA_ARGS__)
+#define LCD_ERR(V, X, ...) pr_err("[%d.%d][SDE_%d] %s : error: "X, ktime_to_ms(ktime_get())/1000, ktime_to_ms(ktime_get())%1000, V ? V->ndx : 0, __func__, ## __VA_ARGS__)
 #else
 #define LCD_INFO(V, X, ...) pr_info("[SDE_%d] %s : "X, V ? V->ndx : 0, __func__, ## __VA_ARGS__)
-#endif /* #ifdef CONFIG_SEC_KUNIT */
-
 #define LCD_INFO_ONCE(V, X, ...) pr_info_once("[SDE_%d] %s : "X, V ? V->ndx : 0, __func__, ## __VA_ARGS__)
 #define LCD_ERR(V, X, ...) pr_err("[SDE_%d] %s : error: "X, V ? V->ndx : 0, __func__, ## __VA_ARGS__)
+#endif /* #ifdef CONFIG_SEC_KUNIT */
 
 #define MAX_PANEL_NAME_SIZE 100
 
@@ -137,7 +138,7 @@ extern bool enable_pr_debug;
 #define MAX_INTF_NUM 2
 
 /* Panel Unique Chip ID Byte count */
-#define MAX_CHIP_ID 6
+#define MAX_CHIP_ID 10
 
 /* Panel Unique Cell ID Byte count */
 #define MAX_CELL_ID 16
@@ -469,6 +470,7 @@ enum ss_dsi_cmd_set_type {
 	TX_COLOR_WEAKNESS_DISABLE,
 	TX_ESD_RECOVERY_1,
 	TX_ESD_RECOVERY_2,
+	TX_ESD_SLEEP_IN, /* SiliconWorks DDI need sleep in cmd in ESD Recovery */
 	TX_MCD_READ_RESISTANCE_PRE, /* For read real MCD R/L resistance */
 	TX_MCD_READ_RESISTANCE, /* For read real MCD R/L resistance */
 	TX_MCD_READ_RESISTANCE_POST, /* For read real MCD R/L resistance */
@@ -664,6 +666,8 @@ enum ss_dsi_cmd_set_type {
 	TX_GCT_ENTER,
 	TX_GCT_MID,
 	TX_GCT_EXIT,
+	TX_GCT_LV, /* support_ss_cmd  */
+	TX_GCT_HV, /* support_ss_cmd  */
 	TX_GRAY_SPOT_TEST_ON,
 	TX_GRAY_SPOT_TEST_OFF,
 	RX_GRAYSPOT_RESTORE_VALUE,
@@ -797,6 +801,7 @@ struct ss_cmd_desc {
 
 struct ss_cmd_set {
 	struct dsi_panel_cmd_set base;
+	bool is_ss_style_cmd;
 
 	u32 count;
 	struct ss_cmd_desc *cmds;
@@ -889,6 +894,12 @@ struct samsung_display_dtsi_data {
 
 	/* Support ddi has 6 bytes DDI_ID */
 	int ddi_id_length;
+
+	/* Siliconworks_ddi has different CELL_ID Type */
+	int cell_id_type;
+
+	/* SiliconWorks DDI need sleep in cmd in ESD Recovery */
+	bool esd_sleep_in;
 };
 
 struct display_status {
@@ -1145,8 +1156,10 @@ struct POC {
 
 struct gram_checksum_test {
 	bool is_support;
+	bool is_running;
 	int on;
 	u8 checksum[4];
+	u8 valid_checksum[4];
 };
 
 /* ss_exclusive_mipi_tx: block dcs tx and
@@ -1203,6 +1216,7 @@ struct brightness_info {
 	int elvss_interpolation_temperature;
 
 	int bl_level;		// brightness level via backlight dev
+	int max_bl_level;
 	int cd_level;
 	int interpolation_cd;
 	int gm2_wrdisbv;	/* Gamma mode2 WRDISBV Write Display Brightness */
@@ -1270,6 +1284,7 @@ struct ub_con_detect {
 struct motto_data {
 	bool init_backup;
 	u32 motto_swing;
+	u32 vreg_ctrl_0;
 	u32 hstx_init;
 	u32 motto_emphasis;
 	u32 cal_sel_init;
@@ -1399,6 +1414,7 @@ int samsung_panel_initialize(char *boot_str, unsigned int display_type);
 void S6E3FAB_AMB624XT01_FHD_init(struct samsung_display_driver_data *vdd);
 void S6E3FAB_AMB667XU01_FHD_init(struct samsung_display_driver_data *vdd);
 void S6E3FC3_AMS646YD01_FHD_init(struct samsung_display_driver_data *vdd);
+void S6E3FC3_AMS646YD01_LO_FHD_init(struct samsung_display_driver_data *vdd);
 void S6E3HAB_AMB623TS01_WQHD_init(struct samsung_display_driver_data *vdd);
 void S6E3HAB_AMB677TY01_WQHD_init(struct samsung_display_driver_data *vdd);
 void S6E3HAD_AMB681XV01_WQHD_init(struct samsung_display_driver_data *vdd);
@@ -1416,8 +1432,13 @@ void S6E3XA1_AMF755ZE01_QXGA_init(struct samsung_display_driver_data *vdd);
 void S6E3XA2_AMF755ZE01_QXGA_init(struct samsung_display_driver_data *vdd);
 void S6E3FAB_AMB623ZF01_HD_init(struct samsung_display_driver_data *vdd);
 void EA8082_AMB641ZR01_FHD_init(struct samsung_display_driver_data *vdd);
+void S6E3FC3_AMB641ZR02_FHD_init(struct samsung_display_driver_data *vdd);
 void S6E3FA9_AMB667UM36_FHD_init(struct samsung_display_driver_data *vdd);
 void SW83109_BF067XMM_FHD_init(struct samsung_display_driver_data *vdd);
+void SW83109_WM6676Z21_FHD_init(struct samsung_display_driver_data *vdd);
+void S6E3HAB_AMB667AN01_FHD_init(struct samsung_display_driver_data *vdd);
+void NT36672C_TL066FVMC02_FHD_init(struct samsung_display_driver_data *vdd);
+void NT36672C_PM6585JB3_FHD_init(struct samsung_display_driver_data *vdd);
 void PBA_BOOTING_FHD_init(struct samsung_display_driver_data *vdd);
 void PBA_BOOTING_FHD_DSI1_init(struct samsung_display_driver_data *vdd);
 
@@ -2076,6 +2097,13 @@ struct UDC {
 	bool read_done;
 };
 
+#define MAX_DELAY_NUM	(8)
+
+struct seq_delay {
+	int delay[MAX_DELAY_NUM];
+	int update_count;
+	bool update; /* if true, update delay */
+};
 /*
  * Manage vdd per dsi_panel, respectivley, like below table.
  * Each dsi_display has one dsi_panel and one vdd, respectively.
@@ -2121,6 +2149,12 @@ struct samsung_display_driver_data {
 	struct samsung_display_debug_data *debug_data;
 	struct ss_exclusive_mipi_tx exclusive_tx;
 	struct list_head vdd_list;
+
+	/* exclusive_tx.permit_frame_update is deprecated..
+	 * Instead, use support_ss_cmd and block_commit_cnt.
+	 */
+	atomic_t block_commit_cnt;
+	struct wait_queue_head block_commit_wq;
 
 	int siop_status;
 
@@ -2337,6 +2371,9 @@ struct samsung_display_driver_data {
 
 	int samsung_splash_enabled;
 
+	int cmd_set_on_splash_enabled;
+	int skip_cmd_set_on_splash_enabled;
+
 	/* UB CON DETECT */
 	struct ub_con_detect ub_con_det;
 
@@ -2451,17 +2488,14 @@ struct samsung_display_driver_data {
 	/* UDC data */
 	struct UDC udc;
 
-	/*
-	 * Enter low power stop mode (LP-11) during BLLP (CMD_panel)
-	 * Siliconworks (SW83109) DDI needs LP-11 during BLLP even though cmd panel.
-	 */
-	bool cmd_panel_bllp_lp11_en;
-
 	/* flag that display_on (29h) is on/off */
 	bool display_on;
 
 	/* mdp clock underflow */
 	int cnt_mdp_clk_underflow;
+
+	struct seq_delay on_delay;
+	struct seq_delay off_delay;
 };
 
 extern struct list_head vdds_list;
@@ -2669,6 +2703,8 @@ int ss_rf_info_notify_callback(struct notifier_block *nb,
 				unsigned long size, void *data);
 
 struct dsi_panel_cmd_set *ss_get_cmds(struct samsung_display_driver_data *vdd, int type);
+
+bool is_ss_style_cmd(struct samsung_display_driver_data *vdd, int type);
 
 /***************************************************************************************************
 *		BRIGHTNESS RELATED END.

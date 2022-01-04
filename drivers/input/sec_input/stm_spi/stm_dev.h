@@ -60,6 +60,11 @@ extern struct tsp_dump_callbacks dump_callbacks;
 #endif
 #endif
 
+#if !IS_ENABLED(CONFIG_ARCH_WAIPIO)
+#define ENABLE_RAWDATA_SERVICE
+#endif
+
+
 #include "../sec_input.h"
 #include "../sec_tsp_log.h"
 
@@ -97,6 +102,10 @@ enum stm_ts_fw_update_status {
 };
 
 extern struct stm_ts_data *g_ts;
+
+#if IS_ENABLED(CONFIG_SAMSUNG_TUI) || (IS_ENABLED(CONFIG_SEC_KUNIT) && !IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE))
+extern struct device *ptsp;
+#endif
 
 /**
  * struct stm_ts_finger - Represents fingers.
@@ -357,6 +366,20 @@ enum stm_ts_nvm_data_type {		/* Write Command */
 	STM_TS_NVM_OFFSET_HISTORY_QUEUE_ZERO,
 	STM_TS_NVM_OFFSET_CAL_FAIL_FLAG,
 	STM_TS_NVM_OFFSET_CAL_FAIL_COUNT,
+};
+
+enum {
+	LCD_EARLY_EVENT = 0,
+	LCD_LATE_EVENT
+};
+
+enum {
+	SERVICE_SHUTDOWN = -1,
+	LCD_NONE = 0,
+	LCD_OFF,
+	LCD_ON,
+	LCD_DOZE1,
+	LCD_DOZE2
 };
 
 struct stm_ts_nvm_data_map {
@@ -649,11 +672,12 @@ int stm_tclm_data_write(struct spi_device *client, int address);
 int stm_ts_tclm_execute_force_calibration(struct spi_device *client, int cal_mode);
 void stm_ts_checking_miscal(struct stm_ts_data *ts);
 
-void stm_switching_work(struct work_struct *work);
-
 #if IS_ENABLED(CONFIG_INPUT_SEC_NOTIFIER)
 int stm_notifier_call(struct notifier_block *n, unsigned long data, void *v);
 #endif
+
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
+void stm_switching_work(struct work_struct *work);
 
 #if IS_ENABLED(CONFIG_HALL_NOTIFIER)
 int stm_hall_ic_notify(struct notifier_block *nb, unsigned long flip_cover, void *v);
@@ -661,8 +685,9 @@ int stm_hall_ic_notify(struct notifier_block *nb, unsigned long flip_cover, void
 #if IS_ENABLED(CONFIG_SUPPORT_SENSOR_FOLD)
 int stm_hall_ic_ssh_notify(struct notifier_block *nb, unsigned long flip_cover, void *v);
 #endif
+#endif
 
-#ifdef CONFIG_TOUCHSCREEN_DUMP_MODE
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUMP_MODE)
 extern struct tsp_dump_callbacks dump_callbacks;
 #endif
 
@@ -681,8 +706,10 @@ int stm_ts_spi_tool_proc_init(struct stm_ts_data *ts);
 int stm_ts_spi_tool_proc_remove(void);
 #endif
 void stm_ts_read_rawdata_address(struct stm_ts_data *ts);
+#ifdef ENABLE_RAWDATA_SERVICE
 int stm_ts_rawdata_map_alloc(struct stm_ts_data *ts);
 int stm_ts_rawdata_map_init(struct stm_ts_data *ts);
 void  stm_ts_rawdata_map_remove(struct stm_ts_data *ts);
+#endif
 #endif /* _LINUX_stm_ts_H_ */
 

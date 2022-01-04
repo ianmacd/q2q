@@ -328,7 +328,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 		break;
 	case BATT_VOLTAGE_NOW:
 		{
-			value.intval = 0;
+			value.intval = SEC_BATTERY_VOLTAGE_MV;
 			psy_do_property(battery->pdata->fuelgauge_name, get,
 				POWER_SUPPLY_PROP_VOLTAGE_NOW, value);
 			i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
@@ -710,8 +710,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 					check_val = AFC_12V_OR_20W;
 				else if (is_hv_wire_type(battery->cable_type) ||
 					(is_pd_wire_type(battery->cable_type) &&
-					battery->pd_max_charge_power >= HV_CHARGER_STATUS_STANDARD1 &&
-					battery->hv_pdo) ||
+					battery->pd_max_charge_power >= HV_CHARGER_STATUS_STANDARD1) ||
 					battery->wire_status == SEC_BATTERY_CABLE_PREPARE_TA ||
 					battery->max_charge_power >= HV_CHARGER_STATUS_STANDARD1) /* 12000mW */
 					check_val = AFC_9V_OR_15W;
@@ -822,6 +821,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 
 			for (j = 0; j < 10; j++) {
 				msleep(175);
+				value.intval = SEC_BATTERY_VOLTAGE_MV;
 				psy_do_property(battery->pdata->fuelgauge_name, get,
 					POWER_SUPPLY_PROP_VOLTAGE_NOW, value);
 				ocv_data[j] = value.intval;
@@ -3819,8 +3819,15 @@ ssize_t sec_bat_store_attrs(
 				if (is_pd_wire_type(battery->cable_type)) {
 					battery->update_pd_list = true;
 					pr_info("%s: update pd list\n", __func__);
-					sec_vote(battery->iv_vote, VOTER_HV_DISABLE, true, SEC_INPUT_VOLTAGE_5V);
+#if IS_ENABLED(CONFIG_DIRECT_CHARGING)
+					if (is_pd_apdo_wire_type(battery->cable_type))
+						psy_do_property(battery->pdata->charger_name, set,
+							POWER_SUPPLY_EXT_PROP_REFRESH_CHARGING_SOURCE, value);
+					else
+						sec_vote_refresh(battery->iv_vote);
+#else
 					sec_vote_refresh(battery->iv_vote);
+#endif
 				}
 			} else {
 				battery->pd_disable = false;
@@ -3830,11 +3837,17 @@ ssize_t sec_bat_store_attrs(
 				if (is_pd_wire_type(battery->cable_type)) {
 					battery->update_pd_list = true;
 					pr_info("%s: update pd list\n", __func__);
-					sec_vote(battery->iv_vote, VOTER_HV_DISABLE, false, 0);
+#if IS_ENABLED(CONFIG_DIRECT_CHARGING)
+					if (is_pd_apdo_wire_type(battery->cable_type))
+						psy_do_property(battery->pdata->charger_name, set,
+							POWER_SUPPLY_EXT_PROP_REFRESH_CHARGING_SOURCE, value);
+					else
+						sec_vote_refresh(battery->iv_vote);
+#else
 					sec_vote_refresh(battery->iv_vote);
+#endif
 				}
 			}
-
 			ret = count;
 		}
 		break;

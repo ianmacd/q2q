@@ -65,6 +65,10 @@ extern struct class *sec_class;
 #include <linux/clk.h>
 #endif
 
+#if IS_ENABLED(CONFIG_SPU_VERIFY)
+#include <linux/spu-verify.h>
+#endif
+
 #if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 #if IS_ENABLED(CONFIG_HALL_NOTIFIER)
 #include <linux/hall/hall_ic_notifier.h>

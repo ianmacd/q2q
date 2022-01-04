@@ -1306,8 +1306,7 @@ enum VIB_EVENT {
 // manage by sec motor ic driver
 #define SHORT_DURATION_THRESHOLD 50 // 50 msec
 
-typedef union
-{
+typedef union {
 	uint32_t	DATA;
 	struct {
 	uint32_t	FOLDER_STATE:1,

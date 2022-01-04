@@ -216,7 +216,6 @@ static long perf_mgr_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 		 *If the drawing task keeps boosting value more than 2 frames,
 		 *we initialize boosting information of the task.
 		 */
-
 			tmp_task = find_task_by_vpid(ofi.tid);
 
 			if (tmp_task == NULL ||

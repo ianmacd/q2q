@@ -145,7 +145,7 @@ extern const char unknown_file[];
 
 struct file *local_fopen(const char *fname, int flags, umode_t mode);
 int local_fread(struct file *f, loff_t offset, void *ptr, unsigned long bytes);
-void init_defex_context(struct defex_context *dc, int syscall, struct task_struct *p, struct file *f);
+int init_defex_context(struct defex_context *dc, int syscall, struct task_struct *p, struct file *f);
 void release_defex_context(struct defex_context *dc);
 struct file *get_dc_process_file(struct defex_context *dc);
 const struct path *get_dc_process_dpath(struct defex_context *dc);
@@ -175,6 +175,7 @@ int rules_lookup(const char *target_file, int attribute, struct file *f);
 
 int __init defex_init_sysfs(void);
 void __init creds_fast_hash_init(void);
+int __init do_load_rules(void);
 
 /* -------------------------------------------------------------------------- */
 /* Defex debug API */
@@ -184,8 +185,13 @@ int immutable_status_store(const char *status_str);
 int privesc_status_store(const char *status_str);
 int safeplace_status_store(const char *status_str);
 
+extern bool boot_state_recovery __ro_after_init;
 #ifdef DEFEX_DEPENDING_ON_OEMUNLOCK
 extern bool boot_state_unlocked __ro_after_init;
+extern int warranty_bit __ro_after_init;
+#else
+#define boot_state_unlocked	(0)
+#define warranty_bit		(0)
 #endif /* DEFEX_DEPENDING_ON_OEMUNLOCK */
 
 #endif /* CONFIG_SECURITY_DEFEX_INTERNAL_H */

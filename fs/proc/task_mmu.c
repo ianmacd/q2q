@@ -21,6 +21,7 @@
 #include <linux/pkeys.h>
 #include <linux/mm_inline.h>
 #include <linux/ctype.h>
+#include <linux/freezer.h>
 
 #include <asm/elf.h>
 #include <asm/tlb.h>
@@ -1728,6 +1729,18 @@ const struct file_operations proc_pagemap_operations = {
 };
 #endif /* CONFIG_PROC_PAGE_MONITOR */
 
+#ifdef CONFIG_FREEZING
+static inline bool is_pm_freezing(void)
+{
+	return pm_freezing;
+}
+#else
+static inline bool is_pm_freezing(void)
+{
+	return false;
+}
+#endif /* CONFIG_FREEZING */
+
 #ifdef CONFIG_PROCESS_RECLAIM
 static int reclaim_pte_range(pmd_t *pmd, unsigned long addr,
 				unsigned long end, struct mm_walk *walk)
@@ -1748,10 +1761,8 @@ static int reclaim_pte_range(pmd_t *pmd, unsigned long addr,
 cont:
 	if (rwsem_is_contended(&walk->mm->mmap_sem))
 		return -1;
-#ifdef CONFIG_ZRAM_LRU_WRITEBACK
-	if (zram_is_app_launch())
+	if (is_pm_freezing())
 		return -1;
-#endif
 
 	isolated = 0;
 	pte = pte_offset_map_lock(vma->vm_mm, pmd, addr, &ptl);
@@ -1816,8 +1827,10 @@ static int writeback_pte_range(pmd_t *pmd, unsigned long addr,
 		return 0;
 	if (rwsem_is_contended(&mm->mmap_sem))
 		return -1;
-	if (zram_is_app_launch())
+	if (is_pm_freezing())
 		return -1;
+	if (zram_is_app_launch())
+		return -EBUSY;
 
 	pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
 	for (; addr != end; pte++, addr += PAGE_SIZE) {
@@ -1866,6 +1879,7 @@ static ssize_t reclaim_write(struct file *file, const char __user *buf,
 #ifdef CONFIG_ZRAM_LRU_WRITEBACK
 	struct zwbs *zwbs[NR_ZWBS];
 	void *private;
+	int err = 0;
 #endif
 
 	memset(buffer, 0, sizeof(buffer));
@@ -1933,8 +1947,6 @@ static ssize_t reclaim_write(struct file *file, const char __user *buf,
 		}
 		reclaim_walk_ops.pmd_entry = writeback_pte_range;
 	}
-	while (zram_is_app_launch())
-		msleep(1000);
 #endif
 
 	mm = get_task_mm(task);
@@ -1972,9 +1984,12 @@ static ssize_t reclaim_write(struct file *file, const char __user *buf,
 				continue;
 
 			private = (type == RECLAIM_WRITEBACK) ? (void *)zwbs : (void *)vma;
-			if (walk_page_range(mm, vma->vm_start, vma->vm_end,
-					&reclaim_walk_ops, private))
+			err = walk_page_range(mm, vma->vm_start, vma->vm_end,
+					&reclaim_walk_ops, private);
+			if (err) {
+				count = err;
 				break;
+			}
 #else
 			if (walk_page_range(mm, vma->vm_start, vma->vm_end,
 					&reclaim_walk_ops, vma))

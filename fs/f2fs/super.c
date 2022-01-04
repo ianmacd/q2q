@@ -156,6 +156,8 @@ enum {
 	Opt_compress_algorithm,
 	Opt_compress_log_size,
 	Opt_compress_extension,
+	Opt_compress_chksum,
+	Opt_compress_mode,
 	Opt_err,
 };
 
@@ -225,6 +227,8 @@ static match_table_t f2fs_tokens = {
 	{Opt_compress_algorithm, "compress_algorithm=%s"},
 	{Opt_compress_log_size, "compress_log_size=%u"},
 	{Opt_compress_extension, "compress_extension=%s"},
+	{Opt_compress_chksum, "compress_chksum"},
+	{Opt_compress_mode, "compress_mode=%s"},
 	{Opt_err, NULL},
 };
 
@@ -570,9 +574,12 @@ static int parse_options(struct super_block *sb, char *options, bool is_remount)
 {
 	struct f2fs_sb_info *sbi = F2FS_SB(sb);
 	substring_t args[MAX_OPT_ARGS];
+#ifdef CONFIG_F2FS_FS_COMPRESSION
 	unsigned char (*ext)[F2FS_EXTENSION_LEN];
+	int ext_cnt;
+#endif
 	char *p, *name;
-	int arg = 0, ext_cnt;
+	int arg = 0;
 	kuid_t uid;
 	kgid_t gid;
 	int ret;
@@ -991,6 +998,7 @@ static int parse_options(struct super_block *sb, char *options, bool is_remount)
 			}
 			F2FS_OPTION(sbi).ckpt_ioprio = (unsigned int)arg;
 			break;
+#ifdef CONFIG_F2FS_FS_COMPRESSION
 		case Opt_compress_algorithm:
 			if (!f2fs_sb_has_compression(sbi)) {
 				f2fs_err(sbi, "Compression feature if off");
@@ -1056,6 +1064,32 @@ static int parse_options(struct super_block *sb, char *options, bool is_remount)
 			F2FS_OPTION(sbi).compress_ext_cnt++;
 			kfree(name);
 			break;
+		case Opt_compress_chksum:
+			F2FS_OPTION(sbi).compress_chksum = true;
+			break;
+		case Opt_compress_mode:
+			name = match_strdup(&args[0]);
+			if (!name)
+				return -ENOMEM;
+			if (!strcmp(name, "fs")) {
+				F2FS_OPTION(sbi).compress_mode = COMPR_MODE_FS;
+			} else if (!strcmp(name, "user")) {
+				F2FS_OPTION(sbi).compress_mode = COMPR_MODE_USER;
+			} else {
+				kfree(name);
+				return -EINVAL;
+			}
+			kfree(name);
+			break;
+#else
+		case Opt_compress_algorithm:
+		case Opt_compress_log_size:
+		case Opt_compress_extension:
+		case Opt_compress_chksum:
+		case Opt_compress_mode:
+			f2fs_info(sbi, "compression options not supported");
+			break;
+#endif
 		default:
 			f2fs_err(sbi, "Unrecognized mount option \"%s\" or missing value",
 				 p);
@@ -1141,6 +1175,7 @@ static struct inode *f2fs_alloc_inode(struct super_block *sb)
 	   it will be reinitialize after a reboot.*/
 	inode_set_iversion(&fi->vfs_inode, 1);
 	atomic_set(&fi->dirty_pages, 0);
+	atomic_set(&fi->i_compr_blocks, 0);
 	init_rwsem(&fi->i_sem);
 	spin_lock_init(&fi->i_size_lock);
 	INIT_LIST_HEAD(&fi->dirty_list);
@@ -1152,6 +1187,9 @@ static struct inode *f2fs_alloc_inode(struct super_block *sb)
 	init_rwsem(&fi->i_gc_rwsem[WRITE]);
 	init_rwsem(&fi->i_mmap_sem);
 	init_rwsem(&fi->i_xattr_sem);
+#ifdef CONFIG_F2FS_SEC_SUPPORT_DNODE_RELOCATION
+	init_rwsem(&fi->i_dnode_sem);
+#endif
 
 	/* Will be used by directory only */
 	fi->i_dir_level = F2FS_SB(sb)->dir_level;
@@ -1320,6 +1358,9 @@ static void f2fs_put_super(struct super_block *sb)
 	int i;
 	bool dropped;
 
+	/* unregister procfs/sysfs entries in advance to avoid race case */
+	f2fs_unregister_sysfs(sbi);
+
 	f2fs_quota_off_umount(sb);
 
 	/* prevent remaining shrinker jobs */
@@ -1390,8 +1431,6 @@ static void f2fs_put_super(struct super_block *sb)
 
 	kvfree(sbi->ckpt);
 
-	f2fs_unregister_sysfs(sbi);
-
 	sb->s_fs_info = NULL;
 	if (sbi->s_chksum_driver)
 		crypto_free_shash(sbi->s_chksum_driver);
@@ -1409,7 +1448,10 @@ static void f2fs_put_super(struct super_block *sb)
 	for (i = 0; i < NR_PAGE_TYPE; i++)
 		kvfree(sbi->write_io[i]);
 #ifdef CONFIG_UNICODE
-	utf8_unload(sb->s_encoding);
+	if (sb->s_encoding) {
+		utf8_unload(sb->s_encoding);
+		sb->s_encoding = NULL;
+	}
 #endif
 	kvfree(sbi);
 }
@@ -1636,6 +1678,14 @@ static inline void f2fs_show_compress_options(struct seq_file *seq,
 		seq_printf(seq, ",compress_extension=%s",
 			F2FS_OPTION(sbi).extensions[i]);
 	}
+
+	if (F2FS_OPTION(sbi).compress_chksum)
+		seq_puts(seq, ",compress_chksum");
+
+	if (F2FS_OPTION(sbi).compress_mode == COMPR_MODE_FS)
+		seq_printf(seq, ",compress_mode=%s", "fs");
+	else if (F2FS_OPTION(sbi).compress_mode == COMPR_MODE_USER)
+		seq_printf(seq, ",compress_mode=%s", "user");
 }
 
 static int f2fs_show_options(struct seq_file *seq, struct dentry *root)
@@ -1771,7 +1821,9 @@ static int f2fs_show_options(struct seq_file *seq, struct dentry *root)
 				from_kgid_munged(&init_user_ns,
 					F2FS_OPTION(sbi).flush_group));
 
+#ifdef CONFIG_F2FS_FS_COMPRESSION
 	f2fs_show_compress_options(seq, sbi->sb);
+#endif
 	return 0;
 }
 
@@ -1794,6 +1846,7 @@ static void default_options(struct f2fs_sb_info *sbi, bool remount)
 	/* We change default compress size to 128KB */
 	F2FS_OPTION(sbi).compress_log_size = SEC_COMPRESS_LOG_SIZE;
 	F2FS_OPTION(sbi).compress_ext_cnt = 0;
+	F2FS_OPTION(sbi).compress_mode = COMPR_MODE_USER;
 	F2FS_OPTION(sbi).bggc_mode = BGGC_MODE_ON;
 	F2FS_OPTION(sbi).flush_group = make_kgid(&init_user_ns, F2FS_DEF_FLUSHGROUP);
 
@@ -3719,7 +3772,7 @@ try_onemore:
 	sbi->valid_super_block = valid_super_block;
 	init_rwsem(&sbi->gc_lock);
 	mutex_init(&sbi->writepages);
-	mutex_init(&sbi->cp_mutex);
+	init_rwsem(&sbi->cp_global_sem);
 	init_rwsem(&sbi->node_write);
 	init_rwsem(&sbi->node_change);
 
@@ -4017,7 +4070,7 @@ reset_checkpoint:
 
 	f2fs_tuning_parameters(sbi);
 
-	f2fs_notice(sbi, "Mounted with checkpoint version = %llx",
+	f2fs_notice(sbi, "Mounted with checkpoint version = %llx"
 			"Opts: %s", cur_cp_version(F2FS_CKPT(sbi)), orig_data);
 	f2fs_update_time(sbi, CP_TIME);
 	f2fs_update_time(sbi, REQ_TIME);
@@ -4081,8 +4134,10 @@ free_bio_info:
 		kvfree(sbi->write_io[i]);
 
 #ifdef CONFIG_UNICODE
-	utf8_unload(sb->s_encoding);
-	sb->s_encoding = NULL;
+	if (sb->s_encoding) {
+		utf8_unload(sb->s_encoding);
+		sb->s_encoding = NULL;
+	}
 #endif
 free_options:
 #ifdef CONFIG_QUOTA

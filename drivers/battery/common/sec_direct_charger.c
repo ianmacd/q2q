@@ -616,6 +616,14 @@ static int sec_direct_chg_set_property(struct power_supply *psy,
 					charger->test_mode_source, charger->store_mode);
 			}
 			break;
+		case POWER_SUPPLY_EXT_PROP_REFRESH_CHARGING_SOURCE:
+			if (is_pd_apdo_wire_type(charger->cable_type)) {
+				int charging_source;
+				
+				charging_source = sec_direct_chg_check_charging_source(charger);
+				sec_direct_chg_set_charging_source(charger, charger->charger_mode, charging_source);
+			}			
+			break;
 		case POWER_SUPPLY_EXT_PROP_CHARGING_ENABLED:
 			sec_direct_chg_set_charge(charger, val->intval);
 			break;

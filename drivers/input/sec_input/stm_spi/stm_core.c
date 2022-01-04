@@ -239,12 +239,12 @@ static struct attribute_group secure_attr_group = {
 #endif
 
 #if IS_ENABLED(CONFIG_SAMSUNG_TUI)
-extern int stui_i2c_lock(struct i2c_adapter *adap);
-extern int stui_i2c_unlock(struct i2c_adapter *adap);
+extern int stui_spi_lock(struct spi_master *spi);
+extern int stui_spi_unlock(struct spi_master *spi);
 
 int stm_stui_tsp_enter(void)
 {
-	struct stm_ts_data *ts = g_ts;
+	struct stm_ts_data *ts = dev_get_drvdata(ptsp);
 	int ret = 0;
 
 	if (!ts)
@@ -257,9 +257,9 @@ int stm_stui_tsp_enter(void)
 	disable_irq(ts->irq);
 	stm_ts_release_all_finger(ts);
 
-	ret = stui_i2c_lock(ts->client->adapter);
+	ret = stui_spi_lock(ts->client->controller);
 	if (ret) {
-		pr_err("[STUI] stui_i2c_lock failed : %d\n", ret);
+		pr_err("[STUI] stui_spi_lock failed : %d\n", ret);
 #if IS_ENABLED(CONFIG_INPUT_SEC_NOTIFIER)
 		sec_input_notify(&ts->stm_input_nb, NOTIFIER_SECURE_TOUCH_DISABLE, NULL);
 #endif
@@ -272,15 +272,15 @@ int stm_stui_tsp_enter(void)
 
 int stm_stui_tsp_exit(void)
 {
-	struct stm_ts_data *ts = g_ts;
+	struct stm_ts_data *ts = dev_get_drvdata(ptsp);
 	int ret = 0;
 
 	if (!ts)
 		return -EINVAL;
 
-	ret = stui_i2c_unlock(ts->client->adapter);
+	ret = stui_spi_unlock(ts->client->controller);
 	if (ret)
-		pr_err("[STUI] stui_i2c_unlock failed : %d\n", ret);
+		pr_err("[STUI] stui_spi_unlock failed : %d\n", ret);
 
 	enable_irq(ts->irq);
 
@@ -289,6 +289,11 @@ int stm_stui_tsp_exit(void)
 #endif
 
 	return ret;
+}
+
+int stm_stui_tsp_type(void)
+{
+	return STUI_TSP_TYPE_STM;
 }
 #endif
 
@@ -313,12 +318,17 @@ int stm_ts_spi_write(struct stm_ts_data *ts, u8 *reg, int tlen, u8 *data, int le
 		}
 	}
 
+#if IS_ENABLED(CONFIG_SAMSUNG_TUI)
+	if (STUI_MODE_TOUCH_SEC & stui_get_mode())
+		return -EBUSY;
+#endif
 #if IS_ENABLED(CONFIG_INPUT_SEC_SECURE_TOUCH)
 	if (atomic_read(&ts->secure_enabled) == SECURE_TOUCH_ENABLE) {
 		input_err(true, &ts->client->dev, "%s: TUI is enabled\n", __func__);
 		return -EBUSY;
 	}
 #endif
+
 	m = kzalloc(sizeof(struct spi_message), GFP_KERNEL);
 	if (!m)
 		return -ENOMEM;
@@ -343,6 +353,7 @@ int stm_ts_spi_write(struct stm_ts_data *ts, u8 *reg, int tlen, u8 *data, int le
 		case STM_TS_CMD_FRM_BUFF_R://0xA7
 		case STM_TS_CMD_REG_W://0xFA
 		case STM_TS_CMD_REG_R://0xFB
+		case STM_TS_CMD_SPONGE_W: //0xD0
 			memcpy(&tbuf[0], reg, tlen);
 			memcpy(&tbuf[tlen], data, len);
 			wlen = tlen + len;
@@ -415,6 +426,10 @@ int stm_ts_spi_read(struct stm_ts_data *ts, u8 *reg, int tlen, u8 *buf, int rlen
 		}
 	}
 
+#if IS_ENABLED(CONFIG_SAMSUNG_TUI)
+	if (STUI_MODE_TOUCH_SEC & stui_get_mode())
+		return -EBUSY;
+#endif
 #if IS_ENABLED(CONFIG_INPUT_SEC_SECURE_TOUCH)
 	if (atomic_read(&ts->secure_enabled) == SECURE_TOUCH_ENABLE) {
 		input_err(true, &ts->client->dev, "%s: TUI is enabled\n", __func__);
@@ -1091,7 +1106,7 @@ int stm_ts_input_open(struct input_dev *dev)
 	struct irq_desc *desc = irq_to_desc(ts->irq);
 	int ret;
 
-#if IS_ENABLED(CONFIG_QGKI)
+#if !defined(DUAL_FOLDABLE_GKI)
 	cancel_delayed_work_sync(&ts->work_read_info);
 #endif
 	mutex_lock(&ts->modechange);
@@ -1103,7 +1118,9 @@ int stm_ts_input_open(struct input_dev *dev)
 	secure_touch_stop(ts, 0);
 #endif
 
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 	cancel_delayed_work_sync(&ts->switching_work);
+#endif
 	mutex_lock(&ts->switching_mutex);
 
 	if (ts->plat_data->power_state == SEC_INPUT_STATE_LPM) {
@@ -1134,7 +1151,7 @@ int stm_ts_input_open(struct input_dev *dev)
 		schedule_work(&ts->work_print_info.work);
 	ts->flip_status_prev = ts->flip_status_current;
 
-#if IS_ENABLED(CONFIG_INPUT_SEC_NOTIFIER)
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE) && IS_ENABLED(CONFIG_INPUT_SEC_NOTIFIER)
 	if (ts->plat_data->support_flex_mode && (ts->plat_data->support_dual_foldable == MAIN_TOUCH))
 		sec_input_notify(&ts->stm_input_nb, NOTIFIER_MAIN_TOUCH_ON, NULL);
 #endif
@@ -1145,7 +1162,7 @@ void stm_ts_input_close(struct input_dev *dev)
 {
 	struct stm_ts_data *ts = input_get_drvdata(dev);
 
-#if IS_ENABLED(CONFIG_QGKI)
+#if !defined(DUAL_FOLDABLE_GKI)
 	cancel_delayed_work_sync(&ts->work_read_info);
 #endif
 	if (ts->plat_data->shutdown_called) {
@@ -1177,17 +1194,23 @@ void stm_ts_input_close(struct input_dev *dev)
 	}
 
 	cancel_delayed_work(&ts->reset_work);
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 	cancel_delayed_work_sync(&ts->switching_work);
+#endif
 	mutex_lock(&ts->switching_mutex);
 
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 	if (ts->plat_data->support_dual_foldable == MAIN_TOUCH && ts->flip_status_current == STM_TS_STATUS_FOLDING) {
 		ts->plat_data->stop_device(ts);
 	} else {
+#endif
 		if (ts->plat_data->lowpower_mode || ts->plat_data->ed_enable || ts->plat_data->pocket_mode || ts->plat_data->fod_lp_mode)
 			ts->plat_data->lpmode(ts, TO_LOWPOWER_MODE);
 		else
 			ts->plat_data->stop_device(ts);
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 	}
+#endif
 
 	mutex_unlock(&ts->switching_mutex);
 	mutex_unlock(&ts->modechange);
@@ -1396,10 +1419,12 @@ static int stm_ts_hw_init(struct spi_device *client)
 
 	ts->flip_status = -1;
 
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 	if (ts->plat_data->support_dual_foldable == SUB_TOUCH)
 		ts->flip_status_current = STM_TS_STATUS_FOLDING;
 	else
 		ts->flip_status_current = STM_TS_STATUS_UNFOLDING;
+#endif
 
 	input_info(true, &ts->client->dev, "%s: Initialized\n", __func__);
 
@@ -1481,9 +1506,13 @@ static int stm_ts_init(struct spi_device *client)
 	ts->plat_data->set_grip_data = stm_set_grip_data_to_ic;
 	ts->plat_data->set_temperature = stm_ts_set_temperature;
 
+#if IS_ENABLED(CONFIG_SAMSUNG_TUI) || (IS_ENABLED(CONFIG_SEC_KUNIT) && !IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE))
+	ptsp = &client->dev;
+#endif
 #if IS_ENABLED(CONFIG_SAMSUNG_TUI)
 	ts->plat_data->stui_tsp_enter = stm_stui_tsp_enter;
 	ts->plat_data->stui_tsp_exit = stm_stui_tsp_exit;
+	ts->plat_data->stui_tsp_type = stm_stui_tsp_type;
 #endif
 
 	ts->tdata = tdata;
@@ -1505,7 +1534,9 @@ static int stm_ts_init(struct spi_device *client)
 	INIT_DELAYED_WORK(&ts->work_read_info, stm_ts_read_info_work);
 	INIT_DELAYED_WORK(&ts->work_print_info, stm_ts_print_info_work);
 	INIT_DELAYED_WORK(&ts->work_read_functions, stm_ts_get_touch_function);
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 	INIT_DELAYED_WORK(&ts->switching_work, stm_switching_work);
+#endif
 	INIT_DELAYED_WORK(&ts->secure_work, stm_ts_secure_work);
 	mutex_init(&ts->device_mutex);
 	mutex_init(&ts->spi_mutex);
@@ -1545,6 +1576,7 @@ static int stm_ts_init(struct spi_device *client)
 	sec_input_register_notify(&ts->stm_input_nb, stm_notifier_call, 1);
 #endif
 
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 #if IS_ENABLED(CONFIG_HALL_NOTIFIER)
 	ts->hall_ic_nb.priority = 1;
 	ts->hall_ic_nb.notifier_call = stm_hall_ic_notify;
@@ -1556,6 +1588,7 @@ static int stm_ts_init(struct spi_device *client)
 	ts->hall_ic_nb_ssh.notifier_call = stm_hall_ic_ssh_notify;
 	sensorfold_notifier_register(&ts->hall_ic_nb_ssh);
 	input_info(true, &ts->client->dev, "%s: hall ic(ssh) register\n", __func__);
+#endif
 #endif
 
 #if IS_ENABLED(CONFIG_TOUCHSCREEN_DUMP_MODE)
@@ -1571,7 +1604,7 @@ err_register_input_device:
 	wakeup_source_unregister(ts->plat_data->sec_ws);
 err_null_tdata:
 error_allocate_mem:
-#if !IS_ENABLED(CONFIG_QGKI)
+#if defined(DUAL_FOLDABLE_GKI)
 	return -EPROBE_DEFER;
 #endif
 	regulator_put(pdata->dvdd);
@@ -1593,15 +1626,19 @@ void stm_ts_release(struct spi_device *client)
 	if (ts->stm_input_nb.notifier_call)
 		sec_input_unregister_notify(&ts->stm_input_nb);
 #endif
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 #if IS_ENABLED(CONFIG_HALL_NOTIFIER)
 	if (ts->hall_ic_nb.notifier_call)
 		hall_notifier_unregister(&ts->hall_ic_nb);
+#endif
 #endif
 	cancel_delayed_work_sync(&ts->work_read_info);
 	cancel_delayed_work_sync(&ts->work_print_info);
 	cancel_delayed_work_sync(&ts->work_read_functions);
 	cancel_delayed_work_sync(&ts->reset_work);
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 	cancel_delayed_work_sync(&ts->switching_work);
+#endif
 	cancel_delayed_work_sync(&ts->secure_work);
 	flush_delayed_work(&ts->reset_work);
 #if IS_ENABLED(CONFIG_TOUCHSCREEN_DUMP_MODE)
@@ -1673,10 +1710,12 @@ int stm_ts_spi_probe(struct spi_device *client)
 #endif
 
 	input_err(true, &ts->client->dev, "%s: done\n", __func__);
+#ifdef ENABLE_RAWDATA_SERVICE
 	stm_ts_rawdata_map_init(ts);
+#endif
 	input_log_fix();
 
-	if (!ts->plat_data->shutdown_called)
+	if (!ts->plat_data->shutdown_called && ts->plat_data->bringup != 1)
 		schedule_delayed_work(&ts->work_read_info, msecs_to_jiffies(50));
 
 #if !IS_ENABLED(CONFIG_SAMSUNG_PRODUCT_SHIP)

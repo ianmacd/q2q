@@ -5188,10 +5188,14 @@ handle_fatal_error:
 				csid_hw->hw_intf->hw_idx);
 
 		if ((irq_status[CAM_IFE_CSID_IRQ_REG_IPP] &
-			CSID_PATH_ERROR_CCIF_VIOLATION))
+			CSID_PATH_ERROR_CCIF_VIOLATION)) {
 			CAM_INFO_RATE_LIMIT(CAM_ISP,
 				"CSID:%d IPP CCIF violation",
 				csid_hw->hw_intf->hw_idx);
+			cam_subdev_notify_message(CAM_CSIPHY_DEVICE_TYPE,
+				CAM_SUBDEV_MESSAGE_IRQ_ERR,
+				csid_hw->csi2_rx_cfg.phy_sel);
+		}
 
 		if ((irq_status[CAM_IFE_CSID_IRQ_REG_IPP] &
 			CSID_PATH_OVERFLOW_RECOVERY)) {
@@ -5266,10 +5270,14 @@ handle_fatal_error:
 				csid_hw->hw_intf->hw_idx);
 
 		if ((irq_status[CAM_IFE_CSID_IRQ_REG_PPP] &
-			CSID_PATH_ERROR_CCIF_VIOLATION))
+			CSID_PATH_ERROR_CCIF_VIOLATION)) {
 			CAM_INFO_RATE_LIMIT(CAM_ISP,
 				"CSID:%d PPP CCIF violation",
 				csid_hw->hw_intf->hw_idx);
+			cam_subdev_notify_message(CAM_CSIPHY_DEVICE_TYPE,
+				CAM_SUBDEV_MESSAGE_IRQ_ERR,
+				csid_hw->csi2_rx_cfg.phy_sel);
+		}
 
 		if ((irq_status[CAM_IFE_CSID_IRQ_REG_PPP] &
 			CSID_PATH_OVERFLOW_RECOVERY))
@@ -5338,10 +5346,14 @@ handle_fatal_error:
 				"CSID:%d RDI:%d EOF received",
 				csid_hw->hw_intf->hw_idx, i);
 
-		if ((irq_status[i] & CSID_PATH_ERROR_CCIF_VIOLATION))
+		if ((irq_status[i] & CSID_PATH_ERROR_CCIF_VIOLATION)) {
 			CAM_INFO_RATE_LIMIT(CAM_ISP,
 				"CSID:%d RDI :%d CCIF violation",
 				csid_hw->hw_intf->hw_idx, i);
+			cam_subdev_notify_message(CAM_CSIPHY_DEVICE_TYPE,
+				CAM_SUBDEV_MESSAGE_IRQ_ERR,
+				csid_hw->csi2_rx_cfg.phy_sel);
+		}
 
 		if ((irq_status[i] & CSID_PATH_OVERFLOW_RECOVERY))
 			CAM_INFO_RATE_LIMIT(CAM_ISP,
@@ -5413,10 +5425,14 @@ handle_fatal_error:
 				csid_hw->hw_intf->hw_idx, i);
 
 		if ((irq_status[CAM_IFE_CSID_IRQ_REG_UDI_0 + i] &
-			CSID_PATH_ERROR_CCIF_VIOLATION))
+			CSID_PATH_ERROR_CCIF_VIOLATION)) {
 			CAM_WARN_RATE_LIMIT(CAM_ISP,
 				"CSID:%d UDI :%d CCIF violation",
 				csid_hw->hw_intf->hw_idx, i);
+			cam_subdev_notify_message(CAM_CSIPHY_DEVICE_TYPE,
+				CAM_SUBDEV_MESSAGE_IRQ_ERR,
+				csid_hw->csi2_rx_cfg.phy_sel);
+		}
 
 		if ((irq_status[CAM_IFE_CSID_IRQ_REG_UDI_0 + i] &
 			CSID_PATH_OVERFLOW_RECOVERY))

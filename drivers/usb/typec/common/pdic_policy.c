@@ -23,6 +23,7 @@
 #include <linux/slab.h>
 #include <linux/gpio.h>
 #include <linux/delay.h>
+#include <linux/version.h>
 #include <linux/usb/typec.h>
 #include <linux/usb/typec/common/pdic_core.h>
 #include <linux/usb/typec/common/pdic_notifier.h>
@@ -30,7 +31,11 @@
 #if IS_ENABLED(CONFIG_IF_CB_MANAGER)
 #include <linux/usb/typec/manager/if_cb_manager.h>
 #endif
+#if IS_ENABLED(CONFIG_SEC_PD)
 #include <linux/battery/sec_pd.h>
+#elif defined(CONFIG_BATTERY_NOTIFIER)
+#include <linux/battery/battery_notifier.h>
+#endif
 #include <linux/usb_notify.h>
 #include <linux/power_supply.h>
 
@@ -432,6 +437,9 @@ static void process_typec_data_role(struct pdic_policy *pp_data,
 	int mode = TYPEC_PWR_MODE_USB;
 	int power = 0, data = 0;
 
+	if (pp_data->ic_data->typec_implemented)
+		goto done;
+
 	if (set_role == PP_DFP)
 		data = TYPEC_HOST;
 	else
@@ -481,6 +489,9 @@ static void process_typec_power_role(struct pdic_policy *pp_data,
 	int power = 0, try_role = PP_NO_POW_ROLE;
 	int compl_cond = 0;
 
+	if (pp_data->ic_data->typec_implemented)
+		goto done;
+
 	if (set_role == PP_SOURCE)
 		power = TYPEC_SOURCE;
 	else
@@ -506,6 +517,8 @@ static void process_typec_power_role(struct pdic_policy *pp_data,
 	}
 	
 	typec_set_pwr_role(pp_data->port, power);
+done:
+	return;
 }
 #else
 inline int get_typec_pwr_mode(struct pdic_policy *pp_data) {return 0; }
@@ -543,8 +556,8 @@ static void pdic_policy_dp_detach(struct pdic_policy *pp_data)
 	PDIC_POLICY_SEND_NOTI(pp_data, PDIC_NOTIFY_DEV_DP,
 		PDIC_NOTIFY_ID_DP_CONNECT, 0/*attach*/, 0/*drp*/, 0);
 
-	if (pp_data->ic_data->p_ops->dp_info_clear)
-		pp_data->ic_data->p_ops->dp_info_clear(ic_data->drv_data);
+	if (ic_data->p_ops && ic_data->p_ops->dp_info_clear)
+		ic_data->p_ops->dp_info_clear(ic_data->drv_data);
 err:
 	return;
 }
@@ -603,7 +616,7 @@ static void process_policy_cc_attach(struct pdic_policy *pp_data, int msg)
 		;
 }
 
-void vbus_turn_on_ctrl(bool enable)
+static void vbus_turn_on_ctrl(bool enable)
 {
 	struct otg_notify *o_notify = get_otg_notify();
 	struct power_supply *psy_otg;
@@ -845,20 +858,29 @@ static void process_policy_rid(struct pdic_policy *pp_data, int msg)
 static void process_policy_explicit_contract
 		(struct pdic_policy *pp_data, int msg)
 {
+	struct pdic_notifier_struct *pd_noti = NULL;
 	int mode = TYPEC_PWR_MODE_USB;
 	
 	if (msg == MSG_EX_CNT) {
 		if (pp_data->explicit_contract != PP_EXCNT) {
 			pp_data->explicit_contract = PP_EXCNT;
 #if IS_ENABLED(CONFIG_TYPEC)
-			mode = get_typec_pwr_mode(pp_data);
-			typec_set_pwr_opmode(pp_data->port, mode);
+			if (!pp_data->ic_data->typec_implemented) {
+				mode = get_typec_pwr_mode(pp_data);
+				typec_set_pwr_opmode(pp_data->port, mode);
+			}
 #endif
 		}
-		if (pp_data->power_role == PP_SINK)
-			PDIC_POLICY_SEND_NOTI(pp_data, PDIC_NOTIFY_DEV_BATT,
-				PDIC_NOTIFY_ID_POWER_STATUS,
-				1, 0, 0);
+		if (pp_data->power_role == PP_SINK) {
+			if (pp_pd_noti) {
+				pd_noti = pp_pd_noti;
+				pd_noti->event = PDIC_NOTIFY_EVENT_PD_SINK;
+
+				PDIC_POLICY_SEND_NOTI(pp_data, PDIC_NOTIFY_DEV_BATT,
+					PDIC_NOTIFY_ID_POWER_STATUS,
+					1, 0, 0);
+			}
+		}
 	}
 }
 
@@ -883,9 +905,8 @@ static int pdic_policy_get_alt_info(struct pdic_policy *pp_data)
 		goto err;
 	}
 	
-	if (pp_data->ic_data->p_ops->get_alt_info) {
-		 ret = pp_data->ic_data->p_ops->get_alt_info(
-		 	pp_data->ic_data->drv_data,
+	if (ic_data->p_ops && ic_data->p_ops->get_alt_info) {
+		 ret = ic_data->p_ops->get_alt_info(ic_data->drv_data,
 		 	&pp_data->alt_info);
 		 if (ret < 0) {
 		 	pr_err("%s get_alt_info error. ret %d\n", __func__, ret);
@@ -1107,12 +1128,66 @@ static void process_policy_cc_detach(struct pdic_policy *pp_data)
 		PDIC_NOTIFY_ID_CC_PIN_STATUS, PDIC_NOTIFY_PIN_STATUS_NO_DETERMINATION,
 		0, 0);
 	if (pp_data->temp_alt_mode_stop) {
-		if (pp_data->ic_data->p_ops->set_alt_mode)
+		if (pp_data->ic_data->p_ops && pp_data->ic_data->p_ops->set_alt_mode)
 			pp_data->ic_data->p_ops->set_alt_mode(ALTERNATE_MODE_START);
 	}	
 skip:
 	return;
 }
+
+#if IS_ENABLED(CONFIG_BATTERY_SAMSUNG) && IS_ENABLED(CONFIG_USB_TYPEC_MANAGER_NOTIFIER) && IS_ENABLED(CONFIG_SEC_PD)
+void tcpm_select_pdo(int num)
+{
+	struct power_supply *psy_tcpm;
+	union power_supply_propval val;
+	int ret = 0;
+
+	psy_tcpm = power_supply_get_by_name("tcpm");
+	if (psy_tcpm) {
+		val.intval = num - 1;
+		ret = psy_tcpm->desc->set_property(psy_tcpm, POWER_SUPPLY_PROP_POWER_NOW, &val);
+		if (ret < 0) {
+			pr_err("%s: fail to set POWER_SUPPLY_PROP_POWER_NOW property(%d)\n", __func__, ret);
+		} else {
+			if (pp_pd_noti) {
+				pp_pd_noti->sink_status.selected_pdo_num = num;
+				pp_pd_noti->sink_status.current_pdo_num = num;
+			}
+		}
+	} else {
+		pr_err("%s: Fail to get psy tcpm\n", __func__);
+	}
+}
+#endif
+
+int pdic_policy_send_pdo(void *data, int max_v, int min_v, int max_icl, int cnt, int num, int snum)
+{
+	struct pdic_notifier_struct *pd_noti = NULL;
+	int ret = 0;
+
+	if (!data) {
+		pr_err("%s data is NULL\n", __func__);
+		ret = -ENOENT;
+		goto err;
+	}
+
+	if (pp_pd_noti) {
+		pd_noti = pp_pd_noti;
+
+		pd_noti->sink_status.available_pdo_num = num;
+		pd_noti->sink_status.selected_pdo_num = snum + 1;
+		pd_noti->sink_status.current_pdo_num = snum + 1;
+
+		pd_noti->sink_status.power_list[cnt + 1].max_voltage = max_v;
+		pd_noti->sink_status.power_list[cnt + 1].min_voltage = min_v;
+		pd_noti->sink_status.power_list[cnt + 1].max_current = max_icl;
+		pd_noti->sink_status.power_list[cnt + 1].accept = (max_v > AVAILABLE_VOLTAGE) ? false : true;
+		pr_err("%s: receive[PDO %d] max_v:%d, min_v:%d, max_icl:%d\n", __func__, cnt, max_v, min_v, max_icl);
+	}
+err:
+	return ret;
+}
+EXPORT_SYMBOL_GPL(pdic_policy_send_pdo);
 
 int pdic_policy_send_msg(void *data, int msg)
 {
@@ -1202,6 +1277,7 @@ err:
 EXPORT_SYMBOL_GPL(pdic_policy_send_msg);
 
 #ifdef CONFIG_TYPEC	
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 int port_to_data(struct typec_port *port,
 	struct pdic_policy **p_pp_data, struct pp_ic_data **p_ic_data)
 {
@@ -1221,6 +1297,7 @@ int port_to_data(struct typec_port *port,
 err:
 	return -EINVAL;
 }
+#endif
 
 void pp_role_swap_init(struct role_swap *pp_r_s)
 {
@@ -1230,7 +1307,12 @@ void pp_role_swap_init(struct role_swap *pp_r_s)
 	pp_r_s->try_port_type = PP_NO_POW_ROLE;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 int pdic_policy_dr_set(struct typec_port *port, enum typec_data_role role)
+#else
+int pdic_policy_dr_set(const struct typec_capability *cap,
+		enum typec_data_role role)
+#endif
 {
 	struct pdic_policy *pp_data = NULL;
 	struct pp_ic_data *ic_data = NULL;
@@ -1245,12 +1327,21 @@ int pdic_policy_dr_set(struct typec_port *port, enum typec_data_role role)
 	
 	pr_info("%s role=%s +\n", __func__, pd_p_data_roles[role]);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 	if (port_to_data(port, &pp_data, &ic_data)) {
 		ret = -ENOENT;
 		goto err;
 	}
+#else
+	pp_data = container_of(cap, struct pdic_policy, typec_cap);
+	ic_data = pp_data->ic_data;
+	if (!ic_data) {
+		ret = -ENOENT;
+		goto err;
+	}
+#endif
 
-	if (!ic_data->p_ops->dr_set) {
+	if (!ic_data->p_ops || !ic_data->p_ops->dr_set) {
 		ret = -ECHILD;
 		goto err;
 	}
@@ -1291,7 +1382,11 @@ err:
 	return ret;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 int pdic_policy_pr_set(struct typec_port *port, enum typec_role role)
+#else
+int pdic_policy_pr_set(const struct typec_capability *cap, enum typec_role role)
+#endif
 {
 	struct pdic_policy *pp_data = NULL;
 	struct pp_ic_data *ic_data = NULL;
@@ -1306,12 +1401,21 @@ int pdic_policy_pr_set(struct typec_port *port, enum typec_role role)
 
 	pr_info("%s role=%s +\n", __func__, pd_p_typec_roles[role]);
 	
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 	if (port_to_data(port, &pp_data, &ic_data)) {
 		ret = -ENOENT;
 		goto err;
 	}
+#else
+	pp_data = container_of(cap, struct pdic_policy, typec_cap);
+	ic_data = pp_data->ic_data;
+	if (!ic_data) {
+		ret = -ENOENT;
+		goto err;
+	}
+#endif
 
-	if (!ic_data->p_ops->pr_set) {
+	if (!ic_data->p_ops || !ic_data->p_ops->pr_set) {
 		ret = -ECHILD;
 		goto err;
 	}
@@ -1352,7 +1456,12 @@ err:
 	return ret;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 int pdic_policy_vconn_set(struct typec_port *port, enum typec_role role)
+#else
+int pdic_policy_vconn_set(const struct typec_capability *cap,
+		enum typec_role role)
+#endif
 {
 	struct pdic_policy *pp_data = NULL;
 	struct pp_ic_data *ic_data = NULL;
@@ -1366,12 +1475,21 @@ int pdic_policy_vconn_set(struct typec_port *port, enum typec_role role)
 
 	pr_info("%s role=%s +\n", __func__, pd_p_typec_roles[role]);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 	if (port_to_data(port, &pp_data, &ic_data)) {
 		ret = -ENOENT;
 		goto err;
 	}
+#else
+	pp_data = container_of(cap, struct pdic_policy, typec_cap);
+	ic_data = pp_data->ic_data;
+	if (!ic_data) {
+		ret = -ENOENT;
+		goto err;
+	}
+#endif
 
-	if (!ic_data->p_ops->vconn_set) {
+	if (!ic_data->p_ops || !ic_data->p_ops->vconn_set) {
 		ret = -ECHILD;
 		goto err;
 	}
@@ -1387,8 +1505,13 @@ err:
 }
 
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 int pdic_policy_port_type_set(struct typec_port *port,
 	enum typec_port_type role)
+#else
+int pdic_policy_port_type_set(const struct typec_capability *cap,
+	enum typec_port_type role)
+#endif
 {
 	struct pdic_policy *pp_data = NULL;
 	struct pp_ic_data *ic_data = NULL;
@@ -1403,12 +1526,21 @@ int pdic_policy_port_type_set(struct typec_port *port,
 
 	pr_info("%s role=%s +\n", __func__, pd_p_port_types[role]);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 	if (port_to_data(port, &pp_data, &ic_data)) {
 		ret = -ENOENT;
 		goto err;
 	}
+#else
+	pp_data = container_of(cap, struct pdic_policy, typec_cap);
+	ic_data = pp_data->ic_data;
+	if (!ic_data) {
+		ret = -ENOENT;
+		goto err;
+	}
+#endif
 	
-	if (!ic_data->p_ops->port_type_set) {
+	if (!ic_data->p_ops || !ic_data->p_ops->port_type_set) {
 		ret = -ECHILD;
 		goto err;
 	}
@@ -1447,12 +1579,14 @@ err:
 	return ret;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 static const struct typec_operations pp_typec_ops = {
 	.dr_set			= pdic_policy_dr_set,
 	.pr_set			= pdic_policy_pr_set,
 	.vconn_set		= pdic_policy_vconn_set,
 	.port_type_set	= pdic_policy_port_type_set,
 };
+#endif
 #endif
 
 static void pdic_policy_usbpd_set_host_on(void *data, int mode)
@@ -1488,6 +1622,7 @@ static int pdic_policy_handle_usb_ext_noti(struct notifier_block *nb,
 {
 	struct pdic_policy *pp_data = container_of(nb,
 		struct pdic_policy, usb_ext_noti_nb);
+	struct pp_ic_data *ic_data = pp_data->ic_data;
 	struct pdic_alt_info *alt_info = &pp_data->alt_info;
 	int ret = 0;
 	int enable = *(int *)data;
@@ -1499,8 +1634,8 @@ static int pdic_policy_handle_usb_ext_noti(struct notifier_block *nb,
 		if (ret < 0)
 			goto err;
 		if (enable) {
-			if (pp_data->ic_data->p_ops->set_alt_mode)
-				pp_data->ic_data->p_ops->set_alt_mode(ALTERNATE_MODE_STOP);
+			if (ic_data->p_ops && ic_data->p_ops->set_alt_mode)
+				ic_data->p_ops->set_alt_mode(ALTERNATE_MODE_STOP);
 			if (alt_info->dp_device) {
 				mutex_lock(&pp_data->p_lock);
 				pdic_policy_dp_detach(pp_data);
@@ -1517,8 +1652,8 @@ static int pdic_policy_handle_usb_ext_noti(struct notifier_block *nb,
 	case EXTERNAL_NOTIFY_HOSTBLOCK_POST:
 		if (enable) {
 		} else {
-			if (pp_data->ic_data->p_ops->set_alt_mode)
-				pp_data->ic_data->p_ops->set_alt_mode(ALTERNATE_MODE_START);
+			if (ic_data->p_ops && ic_data->p_ops->set_alt_mode)
+				ic_data->p_ops->set_alt_mode(ALTERNATE_MODE_START);
 		}
 		break;
 	case EXTERNAL_NOTIFY_DEVICEADD:
@@ -1532,8 +1667,8 @@ static int pdic_policy_handle_usb_ext_noti(struct notifier_block *nb,
 		if (enable) {
 			if (alt_info->dp_device) {
 				pp_data->temp_alt_mode_stop = 1;
-				if (pp_data->ic_data->p_ops->set_alt_mode)
-					pp_data->ic_data->p_ops->set_alt_mode(ALTERNATE_MODE_STOP);
+				if (ic_data->p_ops && ic_data->p_ops->set_alt_mode)
+					ic_data->p_ops->set_alt_mode(ALTERNATE_MODE_STOP);
 				mutex_lock(&pp_data->p_lock);
 				pdic_policy_dp_detach(pp_data);
 				mutex_unlock(&pp_data->p_lock);
@@ -1547,8 +1682,8 @@ static int pdic_policy_handle_usb_ext_noti(struct notifier_block *nb,
 		else {
 			if (pp_data->temp_alt_mode_stop) {
 				pp_data->temp_alt_mode_stop = 0;
-				if (pp_data->ic_data->p_ops->set_alt_mode)
-					pp_data->ic_data->p_ops->set_alt_mode(ALTERNATE_MODE_START);
+				if (ic_data->p_ops && ic_data->p_ops->set_alt_mode)
+					ic_data->p_ops->set_alt_mode(ALTERNATE_MODE_START);
 			}
 		}
 	default:
@@ -1589,26 +1724,39 @@ void *pdic_policy_init(struct pp_ic_data *ic_data)
 	ic_data->pp_data = pp_data;
 
 	pp_pd_noti = ic_data->pd_noti;
+#if IS_ENABLED(CONFIG_BATTERY_SAMSUNG) && IS_ENABLED(CONFIG_USB_TYPEC_MANAGER_NOTIFIER) && IS_ENABLED(CONFIG_SEC_PD)
+	pp_pd_noti->sink_status.fp_sec_pd_select_pdo = tcpm_select_pdo;
+#endif
 
 	pp_data->support_pd = ic_data->support_pd;
 
 	pdic_register_switch_device(1);
 
-#ifdef CONFIG_TYPEC	
-	pp_data->typec_cap.revision = USB_TYPEC_REV_1_2;
-	pp_data->typec_cap.pd_revision = 0x300;
-	pp_data->typec_cap.prefer_role = TYPEC_NO_PREFERRED_ROLE;
-	
-	pp_data->typec_cap.driver_data = pp_data;
-	pp_data->typec_cap.ops = &pp_typec_ops;
-	
-	pp_data->typec_cap.type = TYPEC_PORT_DRP;
-	pp_data->typec_cap.data = TYPEC_PORT_DRD;
-	
-	pp_data->port = typec_register_port(ic_data->dev, &pp_data->typec_cap);
-	if (IS_ERR(pp_data->port)) {
-		pr_err("unable to register typec_register_port\n");
-		goto err2;
+#if IS_ENABLED(CONFIG_TYPEC)
+	if (!pp_data->ic_data->typec_implemented) {
+		pp_data->typec_cap.revision = USB_TYPEC_REV_1_2;
+		pp_data->typec_cap.pd_revision = 0x300;
+		pp_data->typec_cap.prefer_role = TYPEC_NO_PREFERRED_ROLE;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+		pp_data->typec_cap.driver_data = pp_data;
+		pp_data->typec_cap.ops = &pp_typec_ops;
+#else
+		pp_data->typec_cap.dr_set = pdic_policy_dr_set;
+		pp_data->typec_cap.pr_set = pdic_policy_pr_set;
+		pp_data->typec_cap.vconn_set = pdic_policy_vconn_set;
+		pp_data->typec_cap.port_type_set = pdic_policy_port_type_set;
+#endif
+
+		pp_data->typec_cap.type = TYPEC_PORT_DRP;
+		pp_data->typec_cap.data = TYPEC_PORT_DRD;
+
+		pp_data->port = typec_register_port(ic_data->dev, 
+				&pp_data->typec_cap);
+		if (IS_ERR(pp_data->port)) {
+			pr_err("unable to register typec_register_port\n");
+			goto err2;
+		}
 	}
 #endif
 
@@ -1651,7 +1799,8 @@ void pdic_policy_deinit(struct pp_ic_data *ic_data)
 
 		usb_external_notify_unregister(&pp_data->usb_ext_noti_nb);
 #ifdef CONFIG_TYPEC
-		typec_unregister_port(pp_data->port);
+		if (!pp_data->ic_data->typec_implemented)
+			typec_unregister_port(pp_data->port);
 #endif	
 		flush_workqueue(pp_data->pdic_wq);
 		destroy_workqueue(pp_data->pdic_wq);

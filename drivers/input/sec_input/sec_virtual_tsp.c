@@ -67,7 +67,6 @@ static void sec_virtual_tsp_main_cmd(void *device_data)
 }
 #endif
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_ZINITIX_ZTW522)
 static void sec_virtual_tsp_sub_cmd(void *device_data)
 {
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
@@ -85,7 +84,6 @@ static void sec_virtual_tsp_sub_cmd(void *device_data)
 
 	sec_cmd_virtual_tsp_write_cmd(sec, main, sub);
 }
-#endif
 
 static void sec_virtual_tsp_switch_cmd(void *device_data)
 {
@@ -278,7 +276,7 @@ static struct sec_cmd tsp_commands[] = {
 	/* sub touch test (fold open) */
 	{SEC_CMD("dead_zone_enable", sec_virtual_tsp_dual_cmd),},
 #endif
-
+	{SEC_CMD("two_finger_doubletap_enable", sec_virtual_tsp_sub_cmd),},
 	{SEC_CMD("factory_cmd_result_all", sec_virtual_tsp_factory_cmd_result_all),},
 	{SEC_CMD("factory_cmd_result_all_imagetest", sec_virtual_tsp_factory_cmd_result_all),},
 

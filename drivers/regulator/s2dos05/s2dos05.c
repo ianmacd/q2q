@@ -61,10 +61,9 @@ struct s2dos05_data {
 	struct device *dev;
 #endif
 #if IS_ENABLED(CONFIG_SEC_PM)
-	struct notifier_block fb_block;
-#if IS_ENABLED(CONFIG_SEC_PM_QCOM)
-	struct delayed_work fd_work;
-#endif
+	struct notifier_block fb_block __maybe_unused;
+	struct delayed_work fd_work __maybe_unused;
+	bool fd_work_init;
 #endif /* CONFIG_SEC_PM */
 };
 
@@ -81,7 +80,11 @@ int s2dos05_read_reg(struct i2c_client *i2c, u8 reg, u8 *dest)
 		pr_info("%s:%s reg(0x%02hhx), ret(%d)\n",
 			 MFD_DEV_NAME, __func__, reg, ret);
 #if IS_ENABLED(CONFIG_SEC_ABC)
-		sec_abc_send_event("MODULE=pmic@ERROR=s2dos05_read_reg");
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=pmic@INFO=s2dos05_read_reg");
+#else
+		sec_abc_send_event("MODULE=pmic@WARN=s2dos05_read_reg");
+#endif
 #endif /* CONFIG_SEC_ABC */
 		return ret;
 	}
@@ -103,7 +106,11 @@ int s2dos05_bulk_read(struct i2c_client *i2c, u8 reg, int count, u8 *buf)
 	mutex_unlock(&s2dos05->i2c_lock);
 	if (ret < 0) {
 #if IS_ENABLED(CONFIG_SEC_ABC)
-		sec_abc_send_event("MODULE=pmic@ERROR=s2dos05_bulk_read");
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=pmic@INFO=s2dos05_bulk_read");
+#else
+		sec_abc_send_event("MODULE=pmic@WARN=s2dos05_bulk_read");
+#endif
 #endif /* CONFIG_SEC_ABC */
 		return ret;
 	}
@@ -123,7 +130,11 @@ int s2dos05_read_word(struct i2c_client *i2c, u8 reg)
 	mutex_unlock(&s2dos05->i2c_lock);
 	if (ret < 0) {
 #if IS_ENABLED(CONFIG_SEC_ABC)
-		sec_abc_send_event("MODULE=pmic@ERROR=s2dos05_read_word");
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=pmic@INFO=s2dos05_read_word");
+#else
+		sec_abc_send_event("MODULE=pmic@WARN=s2dos05_read_word");
+#endif
 #endif /* CONFIG_SEC_ABC */
 		return ret;
 	}
@@ -145,7 +156,11 @@ int s2dos05_write_reg(struct i2c_client *i2c, u8 reg, u8 value)
 		pr_info("%s:%s reg(0x%02hhx), ret(%d)\n",
 				MFD_DEV_NAME, __func__, reg, ret);
 #if IS_ENABLED(CONFIG_SEC_ABC)
-		sec_abc_send_event("MODULE=pmic@ERROR=s2dos05_write_reg");
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=pmic@INFO=s2dos05_write_reg");
+#else
+		sec_abc_send_event("MODULE=pmic@WARN=s2dos05_write_reg");
+#endif
 #endif /* CONFIG_SEC_ABC */
 	}
 
@@ -164,7 +179,11 @@ int s2dos05_bulk_write(struct i2c_client *i2c, u8 reg, int count, u8 *buf)
 	mutex_unlock(&s2dos05->i2c_lock);
 	if (ret < 0) {
 #if IS_ENABLED(CONFIG_SEC_ABC)
-		sec_abc_send_event("MODULE=pmic@ERROR=s2dos05_bulk_write");
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=pmic@INFO=s2dos05_bulk_write");
+#else
+		sec_abc_send_event("MODULE=pmic@WARN=s2dos05_bulk_write");
+#endif
 #endif /* CONFIG_SEC_ABC */
 		return ret;
 	}
@@ -191,7 +210,11 @@ int s2dos05_update_reg(struct i2c_client *i2c, u8 reg, u8 val, u8 mask)
 
 #if IS_ENABLED(CONFIG_SEC_ABC)
 	if (ret < 0)
-		sec_abc_send_event("MODULE=pmic@ERROR=s2dos05_update_reg");
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=pmic@INFO=s2dos05_update_reg");
+#else
+		sec_abc_send_event("MODULE=pmic@WARN=s2dos05_update_reg");
+#endif
 #endif /* CONFIG_SEC_ABC */
 
 	return ret;
@@ -377,6 +400,56 @@ static int s2m_get_elvss_ssd_current_limit(struct regulator_dev *rdev)
 	ret = (val & S2DOS05_ELVSS_SEL_SSD_MASK) >> 5;
 	return (ret + 1) * 2000;
 }
+
+#if IS_ENABLED(CONFIG_ARCH_QCOM)
+static int s2m_elvss_fd_is_enabled(struct regulator_dev *rdev)
+{
+	/* Always return false due to timing issue */
+	return 0;
+}
+#else
+static int s2m_elvss_fd_is_enabled(struct regulator_dev *rdev)
+{
+	struct s2dos05_data *info = rdev_get_drvdata(rdev);
+	struct i2c_client *i2c = info->iodev->i2c;
+	int ret;
+	u8 val;
+
+	ret = s2dos05_read_reg(i2c, S2DOS05_REG_UVLO_FD, &val);
+	if (ret < 0) {
+		/* If failed to read FD status, suppose it is not enabled */
+		pr_info("%s: fail to read i2c address\n", __func__);
+		return 0;
+	}
+
+	return !(val & 0x1);
+}
+#endif
+
+static int s2m_elvss_fd_enable(struct regulator_dev *rdev)
+{
+	int ret = 0;
+	struct s2dos05_data *info = rdev_get_drvdata(rdev);
+
+	/* To guarantee fd_work is initialized */
+	if (info->fd_work_init) {
+		ret = schedule_delayed_work(&info->fd_work, msecs_to_jiffies(500));
+		if(!ret)
+			pr_info("%s: schedule_delayed_work error!\n", __func__);
+	}
+
+	return ret;
+}
+
+static int s2m_elvss_fd_disable(struct regulator_dev *rdev)
+{
+	struct s2dos05_data *info = rdev_get_drvdata(rdev);
+
+	if (info->fd_work_init)
+		cancel_delayed_work_sync(&info->fd_work);
+	
+	return 0;
+}
 #endif /* CONFIG_SEC_PM */
 
 static struct regulator_ops s2dos05_ldo_ops = {
@@ -405,6 +478,12 @@ static struct regulator_ops s2dos05_buck_ops = {
 static struct regulator_ops s2dos05_elvss_ssd_ops = {
 	.set_current_limit	= s2m_set_elvss_ssd_current_limit,
 	.get_current_limit	= s2m_get_elvss_ssd_current_limit,
+};
+
+static struct regulator_ops s2dos05_elvss_fd_ops = {
+	.is_enabled		= s2m_elvss_fd_is_enabled,
+	.enable			= s2m_elvss_fd_enable,
+	.disable		= s2m_elvss_fd_disable,
 };
 #endif /* CONFIG_SEC_PM */
 
@@ -457,6 +536,14 @@ static struct regulator_ops s2dos05_elvss_ssd_ops = {
 	.type		= REGULATOR_CURRENT,			\
 	.owner		= THIS_MODULE,				\
 }
+
+#define ELVSS_FD_DESC(_name, _id)				{	\
+	.name		= _name,				\
+	.id		= _id,					\
+	.ops		= &s2dos05_elvss_fd_ops,			\
+	.type		= REGULATOR_CURRENT,			\
+	.owner		= THIS_MODULE,				\
+}
 #endif /* CONFIG_SEC_PM */
 
 static struct regulator_desc regulators[S2DOS05_REGULATOR_MAX] = {
@@ -478,6 +565,7 @@ static struct regulator_desc regulators[S2DOS05_REGULATOR_MAX] = {
 		_REG(_EN), _MASK(_B1), _TIME(_BUCK)),
 #if IS_ENABLED(CONFIG_SEC_PM)
 	ELVSS_DESC("s2dos05-elvss-ssd", S2DOS05_ELVSS_SSD),
+	ELVSS_FD_DESC("s2dos05-avdd-elvdd-elvss-fd", S2DOS05_ELVSS_FD),
 #endif /* CONFIG_SEC_PM */
 };
 
@@ -780,8 +868,7 @@ static ssize_t enable_fd_store(struct device *dev, struct device_attribute *attr
 
 static DEVICE_ATTR(enable_fd, 0664, enable_fd_show, enable_fd_store);
 
-#if IS_ENABLED(CONFIG_SEC_PM_QCOM)
-static void handle_fd_work(struct work_struct *work)
+static void __maybe_unused handle_fd_work(struct work_struct *work)
 {
 	struct s2dos05_data *s2dos05 =
 		container_of(to_delayed_work(work), struct s2dos05_data, fd_work);
@@ -796,9 +883,8 @@ static void handle_fd_work(struct work_struct *work)
 	s2dos05_read_reg(i2c, S2DOS05_REG_UVLO_FD, &uvlo_fd);
 	dev_info(&i2c->dev, "%s: uvlo_fd(0x%02X)\n", __func__, uvlo_fd);
 }
-#endif
 
-static int fb_state_change(struct notifier_block *nb, unsigned long val,
+static int __maybe_unused fb_state_change(struct notifier_block *nb, unsigned long val,
 			   void *data)
 {
 	struct s2dos05_data *s2dos05 =
@@ -984,6 +1070,34 @@ static ssize_t enable_pwr_show(struct device *dev,
 static DEVICE_ATTR(enable_pwr, 0664, enable_pwr_show, enable_pwr_store);
 #endif /* CONFIG_SEC_FACTORY */
 
+#if IS_ENABLED(CONFIG_SEC_PM) && IS_ENABLED(CONFIG_SEC_PM_QCOM)
+static void sec_set_fd(struct s2dos05_data *info)
+{
+	info->fb_block.notifier_call = fb_state_change;
+	msm_drm_register_notifier_client(&info->fb_block);
+	INIT_DELAYED_WORK(&info->fd_work, handle_fd_work);
+	info->fd_work_init = false;
+}
+#elif IS_ENABLED(CONFIG_SEC_PM) && IS_ENABLED(CONFIG_REGULATOR_S2DOS05_ELVSS_FD)
+static void sec_set_fd(struct s2dos05_data *info)
+{
+	INIT_DELAYED_WORK(&info->fd_work, handle_fd_work);
+	info->fd_work_init = true;
+}
+#elif IS_ENABLED(CONFIG_SEC_PM)
+static void sec_set_fd(struct s2dos05_data *info)
+{
+	info->fb_block.notifier_call = fb_state_change;
+	fb_register_client(&info->fb_block);
+	info->fd_work_init = false;
+}
+#else
+static void sec_set_fd(struct s2dos05_data *info)
+{
+	info->fd_work_init = false;
+}
+#endif
+
 static int s2dos05_sec_pm_init(struct s2dos05_data *info)
 {
 	struct s2dos05_dev *iodev = info->iodev;
@@ -1011,13 +1125,9 @@ static int s2dos05_sec_pm_init(struct s2dos05_data *info)
 		dev_err(dev, "%s: Failed to enable FD(%d)\n", __func__, ret);
 		goto remove_sec_disp_pmic_dev;
 	}
-	info->fb_block.notifier_call = fb_state_change;
-#if IS_ENABLED(CONFIG_SEC_PM_QCOM)
-	msm_drm_register_notifier_client(&info->fb_block);
-	INIT_DELAYED_WORK(&info->fd_work, handle_fd_work);
-#else
-	fb_register_client(&info->fb_block);
-#endif
+
+	/* To separate FD operation */
+	sec_set_fd(info);
 
 	ret = device_create_file(iodev->sec_disp_pmic_dev, &dev_attr_enable_fd);
 	if (ret) {

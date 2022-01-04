@@ -76,13 +76,6 @@ enum power_supply_ext_health {
 	POWER_SUPPLY_EXT_HEALTH_MAX,
 };
 
-enum sec_battery_voltage_mode {
-	/* average voltage */
-	SEC_BATTERY_VOLTAGE_AVERAGE = 0,
-	/* open circuit voltage */
-	SEC_BATTERY_VOLTAGE_OCV,
-};
-
 enum sec_battery_current_type {
 	/* uA */
 	SEC_BATTERY_CURRENT_UA = 0,
@@ -163,26 +156,6 @@ enum sec_wireless_auth_mode {
 	WIRELESS_AUTH_RECEIVED,
 	WIRELESS_AUTH_FAIL,
 	WIRELESS_AUTH_PASS,
-};
-
-enum sec_wireless_vout_control_mode {
-	WIRELESS_VOUT_OFF = 0,
-	WIRELESS_VOUT_NORMAL_VOLTAGE,	/* 5V , reserved by factory */
-	WIRELESS_VOUT_RESERVED,			/* 6V */
-	WIRELESS_VOUT_HIGH_VOLTAGE,		/* 9V , reserved by factory */
-	WIRELESS_VOUT_CC_CV_VOUT, /* 4 */
-	WIRELESS_VOUT_CALL, /* 5 */
-	WIRELESS_VOUT_5V, /* 6 */
-	WIRELESS_VOUT_9V, /* 7 */
-	WIRELESS_VOUT_10V, /* 8 */
-	WIRELESS_VOUT_11V, /* 9 */
-	WIRELESS_VOUT_12V, /* 10 */
-	WIRELESS_VOUT_12_5V, /* 11 */
-	WIRELESS_VOUT_5V_STEP, /* 12 */
-	WIRELESS_VOUT_5_5V_STEP, /* 13 */
-	WIRELESS_VOUT_9V_STEP, /* 14 */
-	WIRELESS_VOUT_10V_STEP, /* 15 */
-	WIRELESS_VOUT_4_5V_STEP, /* 16 */
 };
 
 enum sec_wireless_rx_control_mode {
@@ -496,7 +469,6 @@ typedef struct {
 
 #define is_hv_wireless_type(cable_type) ( \
 	cable_type == SEC_BATTERY_CABLE_HV_WIRELESS || \
-	cable_type == SEC_BATTERY_CABLE_HV_WIRELESS_ETX || \
 	cable_type == SEC_BATTERY_CABLE_WIRELESS_HV_STAND || \
 	cable_type == SEC_BATTERY_CABLE_HV_WIRELESS_20 || \
 	cable_type == SEC_BATTERY_CABLE_HV_WIRELESS_20_LIMIT || \
@@ -525,7 +497,6 @@ typedef struct {
 	cable_type != SEC_BATTERY_CABLE_WIRELESS_PACK && \
 	cable_type != SEC_BATTERY_CABLE_WIRELESS_STAND && \
 	cable_type != SEC_BATTERY_CABLE_HV_WIRELESS && \
-	cable_type != SEC_BATTERY_CABLE_HV_WIRELESS_ETX && \
 	cable_type != SEC_BATTERY_CABLE_PREPARE_WIRELESS_HV && \
 	cable_type != SEC_BATTERY_CABLE_WIRELESS_HV_STAND && \
 	cable_type != SEC_BATTERY_CABLE_WIRELESS_VEHICLE && \

@@ -185,8 +185,6 @@ extern int ois_sr_rear4_result;
 #endif
 #endif
 
-uint32_t CAMERA_NORMAL_CAL_CRC;
-
 ConfigInfo_t ConfigInfo[MAX_CONFIG_INFO_IDX];
 
 char M_HW_INFO[HW_INFO_MAX_SIZE] = "";
@@ -308,7 +306,7 @@ static int cam_eeprom_module_info_set_module_id(ModuleInfo_t *mInfo, uint8_t *pM
 }
 
 static int cam_eeprom_module_info_set_load_version(int rev, uint32_t hasSubCaldata,
-	uint32_t is_supported, uint8_t *pMapData, ModuleInfo_t *mInfo)
+	uint32_t is_supported, uint8_t *pMapData, uint32_t camera_normal_cal_crc, ModuleInfo_t *mInfo)
 {
 	int         rc                  = 0;
 	int         i                   = 0;
@@ -579,7 +577,7 @@ static int cam_eeprom_module_info_set_load_version(int rev, uint32_t hasSubCalda
 		}
 	}
 
-	normal_is_supported = CAMERA_NORMAL_CAL_CRC;
+	normal_is_supported = camera_normal_cal_crc;
 
 	if (isValidIdx(DEF_M_CHK_VER, &ConfAddr) == 1)
 	{
@@ -1037,7 +1035,7 @@ static int cam_eeprom_update_module_info(struct cam_eeprom_ctrl_t *e_ctrl)
 			mInfo.mVer.fw_user_ver             = rear_fw_user_ver;
 			mInfo.mVer.fw_factory_ver          = rear_fw_factory_ver;
 
-#if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
+#if defined(CONFIG_SAMSUNG_REAR_TRIPLE) && !defined(CONFIG_SEC_R9Q_PROJECT)
 			mInfo.mVer.sensor2_id              = rear3_sensor_id;
 
 			hasSubCaldata                      = 1;
@@ -1274,7 +1272,7 @@ static int cam_eeprom_update_module_info(struct cam_eeprom_ctrl_t *e_ctrl)
 	memcpy(mInfo.mVer.phone_process_info, M_PROCESS_INFO, PROCESS_INFO_MAX_SIZE);
 
 	cam_eeprom_module_info_set_load_version(rev, hasSubCaldata,
-		e_ctrl->is_supported, e_ctrl->cal_data.mapdata,	&mInfo);
+		e_ctrl->is_supported, e_ctrl->cal_data.mapdata, e_ctrl->camera_normal_cal_crc, &mInfo);
 
 	if (hasSubCaldata == 1)
 	{
@@ -1284,7 +1282,7 @@ static int cam_eeprom_update_module_info(struct cam_eeprom_ctrl_t *e_ctrl)
 		memcpy(mInfoSub.mVer.phone_process_info, S_PROCESS_INFO, PROCESS_INFO_MAX_SIZE);
 
 		cam_eeprom_module_info_set_load_version(rev, hasSubCaldata,
-			e_ctrl->is_supported, e_ctrl->cal_data.mapdata, &mInfoSub);
+			e_ctrl->is_supported, e_ctrl->cal_data.mapdata, e_ctrl->camera_normal_cal_crc, &mInfoSub);
 	}
 
 	if (e_ctrl->soc_info.index == SEC_FRONT_SENSOR) {
@@ -1717,7 +1715,7 @@ static int cam_eeprom_update_module_info(struct cam_eeprom_ctrl_t *e_ctrl)
 	}
 #endif
 
-	rc = cam_eeprom_check_firmware_cal(e_ctrl->is_supported, &mInfo);
+	rc = cam_eeprom_check_firmware_cal(e_ctrl->is_supported, e_ctrl->camera_normal_cal_crc, &mInfo);
 
 #if defined(CONFIG_SAMSUNG_WACOM_NOTIFIER)
 	// Update for each module
@@ -1871,7 +1869,7 @@ void cam_eeprom_update_sysfs_fw_version(
 #endif
 }
 
-int32_t cam_eeprom_check_firmware_cal(uint32_t camera_cal_crc, ModuleInfo_t *mInfo)
+int32_t cam_eeprom_check_firmware_cal(uint32_t camera_cal_crc, uint32_t camera_normal_cal_crc, ModuleInfo_t *mInfo)
 {
 	int rc = 0, offset = 0, cnt = 0;
 	char final_cmd_ack[SYSFS_FW_VER_SIZE] = "NG_";
@@ -1918,7 +1916,7 @@ int32_t cam_eeprom_check_firmware_cal(uint32_t camera_cal_crc, ModuleInfo_t *mIn
 		camera_fw_ack = OK;
 	}
 
-	if (camera_cal_crc == CAMERA_NORMAL_CAL_CRC) {
+	if (camera_cal_crc == camera_normal_cal_crc) {
 		camera_cal_ack = OK;
 		strncpy(cam_cal_ack, "Normal", SYSFS_FW_VER_SIZE);
 	} else {
@@ -2982,9 +2980,9 @@ int32_t cam_eeprom_parse_read_memory_map(struct device_node *of_node,
 	for (i = 0; i < e_ctrl->cal_data.num_map>>1; i++)
 		normal_crc_value |= (1 << i);
 
-	CAMERA_NORMAL_CAL_CRC = normal_crc_value;
+	e_ctrl->camera_normal_cal_crc = normal_crc_value;
 	CAM_INFO(CAM_EEPROM, "num_map = %d, CAMERA_NORMAL_CAL_CRC = 0x%X",
-		e_ctrl->cal_data.num_map, CAMERA_NORMAL_CAL_CRC);
+		e_ctrl->cal_data.num_map, e_ctrl->camera_normal_cal_crc);
 
 	rc = cam_eeprom_read_memory(e_ctrl, &e_ctrl->cal_data);
 	if (rc < 0) {
@@ -4492,9 +4490,9 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 			for (i = 0; i < e_ctrl->cal_data.num_map>>1; i++)
 				normal_crc_value |= (1 << i);
 
-			CAMERA_NORMAL_CAL_CRC = normal_crc_value;
+			e_ctrl->camera_normal_cal_crc = normal_crc_value;
 			CAM_INFO(CAM_EEPROM, "num_map = %d, CAMERA_NORMAL_CAL_CRC = 0x%X",
-				e_ctrl->cal_data.num_map, CAMERA_NORMAL_CAL_CRC);
+				e_ctrl->cal_data.num_map, e_ctrl->camera_normal_cal_crc);
 #if defined(CONFIG_SAMSUNG_CAMERA_OTP)
 			if (e_ctrl->soc_info.index == SEC_ULTRA_WIDE_SENSOR &&
 				soc_private->i2c_info.slave_addr == 0x42){
@@ -4515,7 +4513,7 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 #if defined(CONFIG_SAMSUNG_CAMERA_OTP)
 				if(e_ctrl->soc_info.index == SEC_ULTRA_WIDE_SENSOR &&
 					soc_private->i2c_info.slave_addr  == 0x42){
-				    e_ctrl->is_supported = CAMERA_NORMAL_CAL_CRC;
+				    e_ctrl->is_supported = e_ctrl->camera_normal_cal_crc;
 				}
 				else
 #endif

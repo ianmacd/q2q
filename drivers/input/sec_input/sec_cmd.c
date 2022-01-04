@@ -136,11 +136,7 @@ EXPORT_SYMBOL(sec_cmd_set_cmd_result);
 __visible_for_testing ssize_t sec_cmd_store(struct device *dev,
 		struct device_attribute *devattr, const char *buf, size_t count)
 {
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
-	struct sec_cmd_data *data = kunit_sec;
-#else
 	struct sec_cmd_data *data = dev_get_drvdata(dev);
-#endif
 	char *cur, *start, *end;
 	char buff[SEC_CMD_STR_LEN] = { 0 };
 	int len, i;
@@ -382,11 +378,7 @@ static void sec_cmd_store_function(struct sec_cmd_data *data)
 __visible_for_testing ssize_t sec_cmd_store(struct device *dev, struct device_attribute *devattr,
 			   const char *buf, size_t count)
 {
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
-	struct sec_cmd_data *data = kunit_sec;
-#else
 	struct sec_cmd_data *data = dev_get_drvdata(dev);
-#endif
 	struct command cmd = {{0}};
 	struct sec_cmd *sec_cmd_ptr = NULL;
 	int queue_size;
@@ -489,11 +481,7 @@ __visible_for_testing ssize_t sec_cmd_store(struct device *dev, struct device_at
 __visible_for_testing ssize_t sec_cmd_show_status(struct device *dev,
 				 struct device_attribute *devattr, char *buf)
 {
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
-	struct sec_cmd_data *data = kunit_sec;
-#else
 	struct sec_cmd_data *data = dev_get_drvdata(dev);
-#endif
 	char buff[16] = { 0 };
 
 	if (!data) {
@@ -561,11 +549,7 @@ static ssize_t sec_cmd_show_status_all(struct device *dev,
 __visible_for_testing ssize_t sec_cmd_show_result(struct device *dev,
 				 struct device_attribute *devattr, char *buf)
 {
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
-	struct sec_cmd_data *data = kunit_sec;
-#else
 	struct sec_cmd_data *data = dev_get_drvdata(dev);
-#endif
 	int size;
 
 	if (!data) {
@@ -753,10 +737,6 @@ int sec_cmd_init(struct sec_cmd_data *data, struct sec_cmd *cmds,
 		goto err_sysfs_group;
 	}
 
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
-	if (devt == SEC_CLASS_DEVT_TSP)
-		sec_cmd_virtual_tsp_register(data);
-#endif
 #if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 	switch (devt) {
 	case SEC_CLASS_DEVT_TSP1:
@@ -837,11 +817,14 @@ void sec_cmd_send_event_to_user(struct sec_cmd_data *data, char *test, char *res
 	char timestamp[32];
 	char feature[32];
 	char stest[32];
-	char sresult[32];
+	char sresult[64];
 	ktime_t calltime;
 	u64 realtime;
 	int curr_time;
 	char *eol = "\0";
+
+	if (!data || !data->fac_dev)
+		return;
 
 	calltime = ktime_get();
 	realtime = ktime_to_ns(calltime);
@@ -860,9 +843,9 @@ void sec_cmd_send_event_to_user(struct sec_cmd_data *data, char *test, char *res
 	strncat(stest, eol, 1);
 
 	if (!result) {
-		snprintf(sresult, 32, "RESULT=NULL");
+		snprintf(sresult, 64, "RESULT=NULL");
 	} else {
-		snprintf(sresult, 32, "%s", result);
+		snprintf(sresult, 64, "%s", result);
 	}
 	strncat(sresult, eol, 1);
 
@@ -879,15 +862,9 @@ void sec_cmd_send_event_to_user(struct sec_cmd_data *data, char *test, char *res
 }
 EXPORT_SYMBOL(sec_cmd_send_event_to_user);
 
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 void sec_cmd_virtual_tsp_register(struct sec_cmd_data *sec)
 {
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
-	if (strcmp(dev_name(sec->fac_dev), SEC_CLASS_DEV_NAME_TSP) == 0) {
-		kunit_sec = sec;
-		input_info(true, sec->fac_dev, "%s: tsp\n", __func__);
-	}
-#endif
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 	if (strcmp(dev_name(sec->fac_dev), SEC_CLASS_DEV_NAME_TSP1) == 0) {
 		main_sec = sec;
 		input_info(true, sec->fac_dev, "%s: main\n", __func__);
@@ -895,10 +872,8 @@ void sec_cmd_virtual_tsp_register(struct sec_cmd_data *sec)
 		sub_sec = sec;
 		input_info(true, sec->fac_dev, "%s: sub\n", __func__);
 	}
-#endif
 }
 
-#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 int sec_cmd_virtual_tsp_read_sysfs(struct sec_cmd_data *sec, const char *path, char *buf, int len)
 {
 	int ret = 0;
@@ -1094,7 +1069,7 @@ err:
 EXPORT_SYMBOL(sec_cmd_virtual_tsp_write_cmd_factory_all);
 #endif
 
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
+#if IS_ENABLED(CONFIG_SEC_KUNIT) && !IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 kunit_notifier_chain_init(sec_cmd_test_module);
 
 static int __init sec_cmd_m_init(void)

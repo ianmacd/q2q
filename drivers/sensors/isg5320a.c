@@ -344,7 +344,7 @@ static inline unsigned char str2int(unsigned char c)
 
 	return 0;
 }
-
+#if !IS_ENABLED(CONFIG_SAMSUNG_PRODUCT_SHIP)
 static int isg5320a_setup_reg(struct isg5320a_data *data)
 {
 	int ret;
@@ -412,7 +412,11 @@ static int isg5320a_setup_reg(struct isg5320a_data *data)
 
 	return 0;
 }
-
+#else
+static int isg5320a_setup_reg(struct isg5320a_data *data){
+	return -1;
+}
+#endif
 static int isg5320a_get_raw_data(struct isg5320a_data *data, bool log_print)
 {
 	int ret = 0;
@@ -766,8 +770,6 @@ static ssize_t isg5320a_acal_show(struct device *dev,
 static ssize_t isg5320a_manual_acal_show(struct device *dev,
 					 struct device_attribute *attr, char *buf)
 {
-
-
 	return sprintf(buf, "OK\n");
 }
 
@@ -881,7 +883,6 @@ static ssize_t isg5320a_normal_threshold_show(struct device *dev,
 		       threshold - far_hyst);
 }
 
-
 static ssize_t isg5320a_raw_data_show(struct device *dev,
 				      struct device_attribute *attr, char *buf)
 {
@@ -914,6 +915,238 @@ static ssize_t isg5320a_raw_data_show(struct device *dev,
 		       data->fine_coarse, data->diff, data->base);
 }
 
+static ssize_t isg5320a_diff_avg_show(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%d\n", data->diff_avg);
+}
+
+static ssize_t isg5320a_cdc_avg_show(struct device *dev,
+				     struct device_attribute *attr, char *buf)
+{
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", data->cdc_avg);
+}
+
+static ssize_t isg5320a_ch_state_show(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	int count;
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+
+	if (data->skip_data == true)
+		count = snprintf(buf, PAGE_SIZE, "%d,%d\n", NONE_ENABLE, NONE_ENABLE);
+	else if (data->enable == ON)
+		count = snprintf(buf, PAGE_SIZE, "%d,%d\n", data->state, NONE_ENABLE);
+	else
+		count = snprintf(buf, PAGE_SIZE, "%d,%d\n", NONE_ENABLE, NONE_ENABLE);
+
+	return count;
+}
+
+static ssize_t isg5320a_hysteresis_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+	u32 far_hyst = 0;
+	u8 buf8[6];
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+
+	isg5320a_i2c_read(data, ISG5320A_B_PROXCTL3_REG, buf8, sizeof(buf8));
+
+	far_hyst = ((u32)buf8[4] << 8) | (u32)buf8[5];
+
+	return sprintf(buf, "%d\n", far_hyst);
+}
+
+static ssize_t isg5320a_enable_store(struct device *dev,
+				     struct device_attribute *attr, const char *buf, size_t size)
+{
+	int ret;
+	u8 enable;
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+	int pre_enable = data->enable;
+
+	ret = kstrtou8(buf, 2, &enable);
+	if (ret) {
+		pr_err("%s invalid argument\n", ISG5320A_TAG);
+		return size;
+	}
+
+	pr_info("%s new_value=%d old_value=%d\n", ISG5320A_TAG, (int)enable,
+		pre_enable);
+
+	if (pre_enable == enable)
+		return size;
+
+	isg5320a_set_enable(data, (int)enable);
+
+	return size;
+}
+
+static ssize_t isg5320a_enable_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%d\n", data->enable);
+}
+
+static ssize_t isg5320a_sampling_freq_show(struct device *dev,
+					   struct device_attribute *attr, char *buf)
+{
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+	u8 buff;
+	int sampling_freq;
+
+	isg5320a_i2c_read(data, ISG5320A_NUM_OF_CLK, &buff, 1);
+	sampling_freq = (int)(4000 / ((int)buff + 1));
+
+	return snprintf(buf, PAGE_SIZE, "%dkHz\n", sampling_freq);
+}
+
+static ssize_t isg5320a_isum_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+	const char *table[16] = {
+		"0", "0", "0", "0", "0", "0", "0", "0", "0",
+		"20", "24", "28", "32", "40", "48", "64"
+	};
+	u8 buff = 0;
+
+	isg5320a_i2c_read(data, ISG5320A_CHB_LSUM_TYPE_REG, &buff, 1);
+	buff = (buff & 0xf0) >> 4;
+
+	return snprintf(buf, PAGE_SIZE, "%s\n", table[buff]);
+}
+
+static ssize_t isg5320a_scan_period_show(struct device *dev,
+					 struct device_attribute *attr, char *buf)
+{
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+	u8 buff[2];
+	int scan_period;
+
+	isg5320a_i2c_read(data, ISG5320A_WUTDATA_REG, (u8 *)&buff, sizeof(buff));
+
+	scan_period = (int)(((u16)buff[1] & 0xff) | (((u16)buff[0] & 0x3f) << 8));
+	if (!scan_period)
+		return snprintf(buf, PAGE_SIZE, "%d\n", scan_period);
+
+	scan_period = (int)(4000 / scan_period);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", scan_period);
+}
+
+static ssize_t isg5320a_again_show(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+	u8 buff;
+	u8 temp1, temp2;
+
+	isg5320a_i2c_read(data, ISG5320A_ANALOG_GAIN, &buff, 1);
+	temp1 = (buff & 0x38) >> 3;
+	temp2 = (buff & 0x07);
+
+	return snprintf(buf, PAGE_SIZE, "%d/%d\n", (int)temp2 + 1, (int)temp1 + 1);
+}
+
+static ssize_t isg5320a_cdc_up_coef_show(struct device *dev,
+					 struct device_attribute *attr, char *buf)
+{
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+	u8 buff;
+	int coef;
+
+	isg5320a_i2c_read(data, ISG5320A_CHB_CDC_UP_COEF_REG, &buff, 1);
+	coef = (int)buff;
+
+	return snprintf(buf, PAGE_SIZE, "%x, %d\n", buff, coef);
+}
+
+static ssize_t isg5320a_cdc_down_coef_show(struct device *dev,
+					   struct device_attribute *attr, char *buf)
+{
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+	u8 buff;
+	int coef;
+
+	isg5320a_i2c_read(data, ISG5320A_CHB_CDC_DN_COEF_REG, &buff, 1);
+	coef = (int)buff;
+
+	return snprintf(buf, PAGE_SIZE, "%x, %d\n", buff, coef);
+}
+
+static ssize_t isg5320a_temp_enable_show(struct device *dev,
+					 struct device_attribute *attr, char *buf)
+{
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+	u8 buff;
+
+	isg5320a_i2c_read(data, ISG5320A_TEMPERATURE_ENABLE_REG, &buff, 1);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", ((buff & 0x40) >> 6));
+}
+
+static ssize_t isg5320a_irq_count_show(struct device *dev,
+				       struct device_attribute *attr, char *buf)
+{
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+
+	int ret = 0;
+	s16 max_diff_val = 0;
+
+	if (data->irq_count) {
+		ret = -1;
+		max_diff_val = data->max_diff;
+	} else {
+		max_diff_val = data->max_normal_diff;
+	}
+
+	pr_info("%s %s - called\n", ISG5320A_TAG, __func__);
+
+	return snprintf(buf, PAGE_SIZE, "%d,%d,%d\n", ret, data->irq_count,
+			max_diff_val);
+}
+
+static ssize_t isg5320a_irq_count_store(struct device *dev,
+					struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct isg5320a_data *data = dev_get_drvdata(dev);
+
+	u8 onoff;
+	int ret;
+
+	ret = kstrtou8(buf, 10, &onoff);
+	if (ret < 0) {
+		pr_err("%s invalid argument\n", ISG5320A_TAG);
+		return count;
+	}
+
+	mutex_lock(&data->lock);
+
+	if (onoff == 0) {
+		data->abnormal_mode = OFF;
+	} else if (onoff == 1) {
+		data->abnormal_mode = ON;
+		data->irq_count = 0;
+		data->max_diff = 0;
+		data->max_normal_diff = 0;
+	} else {
+		pr_err("%s invalid value %d\n", ISG5320A_TAG, onoff);
+	}
+
+	mutex_unlock(&data->lock);
+
+	pr_info("%s %s - %d\n", ISG5320A_TAG, __func__, onoff);
+
+	return count;
+}
+#if !IS_ENABLED(CONFIG_SAMSUNG_PRODUCT_SHIP)
 static ssize_t isg5320a_debug_raw_data_show(struct device *dev,
 					    struct device_attribute *attr, char *buf)
 {
@@ -967,52 +1200,6 @@ static ssize_t isg5320a_debug_data_show(struct device *dev,
 	struct isg5320a_data *data = dev_get_drvdata(dev);
 
 	return sprintf(buf, "%d,%d,%d\n", data->cdc, data->base, data->diff);
-}
-
-static ssize_t isg5320a_diff_avg_show(struct device *dev,
-				      struct device_attribute *attr, char *buf)
-{
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-
-	return sprintf(buf, "%d\n", data->diff_avg);
-}
-
-static ssize_t isg5320a_cdc_avg_show(struct device *dev,
-				     struct device_attribute *attr, char *buf)
-{
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", data->cdc_avg);
-}
-
-static ssize_t isg5320a_ch_state_show(struct device *dev,
-				      struct device_attribute *attr, char *buf)
-{
-	int count;
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-
-	if (data->skip_data == true)
-		count = snprintf(buf, PAGE_SIZE, "%d,%d\n", NONE_ENABLE, NONE_ENABLE);
-	else if (data->enable == ON)
-		count = snprintf(buf, PAGE_SIZE, "%d,%d\n", data->state, NONE_ENABLE);
-	else
-		count = snprintf(buf, PAGE_SIZE, "%d,%d\n", NONE_ENABLE, NONE_ENABLE);
-
-	return count;
-}
-
-static ssize_t isg5320a_hysteresis_show(struct device *dev,
-					struct device_attribute *attr, char *buf)
-{
-	u32 far_hyst = 0;
-	u8 buf8[6];
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-
-	isg5320a_i2c_read(data, ISG5320A_B_PROXCTL3_REG, buf8, sizeof(buf8));
-
-	far_hyst = ((u32)buf8[4] << 8) | (u32)buf8[5];
-
-	return sprintf(buf, "%d\n", far_hyst);
 }
 
 static ssize_t isg5320a_reg_update_show(struct device *dev,
@@ -1207,138 +1394,6 @@ static ssize_t isg5320a_toggle_enable_show(struct device *dev,
 	return sprintf(buf, "%d\n", data->enable);
 }
 
-static ssize_t isg5320a_enable_store(struct device *dev,
-				     struct device_attribute *attr, const char *buf, size_t size)
-{
-	int ret;
-	u8 enable;
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-	int pre_enable = data->enable;
-
-	ret = kstrtou8(buf, 2, &enable);
-	if (ret) {
-		pr_err("%s invalid argument\n", ISG5320A_TAG);
-		return size;
-	}
-
-	pr_info("%s new_value=%d old_value=%d\n", ISG5320A_TAG, (int)enable,
-		pre_enable);
-
-	if (pre_enable == enable)
-		return size;
-
-	isg5320a_set_enable(data, (int)enable);
-
-	return size;
-}
-
-static ssize_t isg5320a_enable_show(struct device *dev,
-				    struct device_attribute *attr, char *buf)
-{
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-
-	return sprintf(buf, "%d\n", data->enable);
-}
-
-static ssize_t isg5320a_sampling_freq_show(struct device *dev,
-					   struct device_attribute *attr, char *buf)
-{
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-	u8 buff;
-	int sampling_freq;
-
-	isg5320a_i2c_read(data, ISG5320A_NUM_OF_CLK, &buff, 1);
-	sampling_freq = (int)(4000 / ((int)buff + 1));
-
-	return snprintf(buf, PAGE_SIZE, "%dkHz\n", sampling_freq);
-}
-
-static ssize_t isg5320a_isum_show(struct device *dev,
-				  struct device_attribute *attr, char *buf)
-{
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-	const char *table[16] = {
-		"0", "0", "0", "0", "0", "0", "0", "0", "0",
-		"20", "24", "28", "32", "40", "48", "64"
-	};
-	u8 buff = 0;
-
-	isg5320a_i2c_read(data, ISG5320A_CHB_LSUM_TYPE_REG, &buff, 1);
-	buff = (buff & 0xf0) >> 4;
-
-	return snprintf(buf, PAGE_SIZE, "%s\n", table[buff]);
-}
-
-static ssize_t isg5320a_scan_period_show(struct device *dev,
-					 struct device_attribute *attr, char *buf)
-{
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-	u8 buff[2];
-	int scan_period;
-
-	isg5320a_i2c_read(data, ISG5320A_WUTDATA_REG, (u8 *)&buff, sizeof(buff));
-
-	scan_period = (int)(((u16)buff[1] & 0xff) | (((u16)buff[0] & 0x3f) << 8));
-	if (!scan_period)
-		return snprintf(buf, PAGE_SIZE, "%d\n", scan_period);
-
-	scan_period = (int)(4000 / scan_period);
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", scan_period);
-}
-
-static ssize_t isg5320a_again_show(struct device *dev,
-				   struct device_attribute *attr, char *buf)
-{
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-	u8 buff;
-	u8 temp1, temp2;
-
-	isg5320a_i2c_read(data, ISG5320A_ANALOG_GAIN, &buff, 1);
-	temp1 = (buff & 0x38) >> 3;
-	temp2 = (buff & 0x07);
-
-	return snprintf(buf, PAGE_SIZE, "%d/%d\n", (int)temp2 + 1, (int)temp1 + 1);
-}
-
-static ssize_t isg5320a_cdc_up_coef_show(struct device *dev,
-					 struct device_attribute *attr, char *buf)
-{
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-	u8 buff;
-	int coef;
-
-	isg5320a_i2c_read(data, ISG5320A_CHB_CDC_UP_COEF_REG, &buff, 1);
-	coef = (int)buff;
-
-	return snprintf(buf, PAGE_SIZE, "%x, %d\n", buff, coef);
-}
-
-static ssize_t isg5320a_cdc_down_coef_show(struct device *dev,
-					   struct device_attribute *attr, char *buf)
-{
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-	u8 buff;
-	int coef;
-
-	isg5320a_i2c_read(data, ISG5320A_CHB_CDC_DN_COEF_REG, &buff, 1);
-	coef = (int)buff;
-
-	return snprintf(buf, PAGE_SIZE, "%x, %d\n", buff, coef);
-}
-
-static ssize_t isg5320a_temp_enable_show(struct device *dev,
-					 struct device_attribute *attr, char *buf)
-{
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-	u8 buff;
-
-	isg5320a_i2c_read(data, ISG5320A_TEMPERATURE_ENABLE_REG, &buff, 1);
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", ((buff & 0x40) >> 6));
-}
-
-
 static ssize_t isg5320a_cml_show(struct device *dev,
 				 struct device_attribute *attr, char *buf)
 {
@@ -1349,62 +1404,7 @@ static ssize_t isg5320a_cml_show(struct device *dev,
 
 	return snprintf(buf, PAGE_SIZE, "%d\n", (buff & 0x07));
 }
-
-static ssize_t isg5320a_irq_count_show(struct device *dev,
-				       struct device_attribute *attr, char *buf)
-{
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-
-	int ret = 0;
-	s16 max_diff_val = 0;
-
-	if (data->irq_count) {
-		ret = -1;
-		max_diff_val = data->max_diff;
-	} else {
-		max_diff_val = data->max_normal_diff;
-	}
-
-	pr_info("%s %s - called\n", ISG5320A_TAG, __func__);
-
-	return snprintf(buf, PAGE_SIZE, "%d,%d,%d\n", ret, data->irq_count,
-			max_diff_val);
-}
-
-static ssize_t isg5320a_irq_count_store(struct device *dev,
-					struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct isg5320a_data *data = dev_get_drvdata(dev);
-
-	u8 onoff;
-	int ret;
-
-	ret = kstrtou8(buf, 10, &onoff);
-	if (ret < 0) {
-		pr_err("%s invalid argument\n", ISG5320A_TAG);
-		return count;
-	}
-
-	mutex_lock(&data->lock);
-
-	if (onoff == 0) {
-		data->abnormal_mode = OFF;
-	} else if (onoff == 1) {
-		data->abnormal_mode = ON;
-		data->irq_count = 0;
-		data->max_diff = 0;
-		data->max_normal_diff = 0;
-	} else {
-		pr_err("%s invalid value %d\n", ISG5320A_TAG, onoff);
-	}
-
-	mutex_unlock(&data->lock);
-
-	pr_info("%s %s - %d\n", ISG5320A_TAG, __func__, onoff);
-
-	return count;
-}
-
+#endif
 static DEVICE_ATTR(name, S_IRUGO, isg5320a_name_show, NULL);
 static DEVICE_ATTR(vendor, S_IRUGO, isg5320a_vendor_show, NULL);
 static DEVICE_ATTR(mode, S_IRUGO, isg5320a_mode_show, NULL);
@@ -1416,13 +1416,23 @@ static DEVICE_ATTR(reset, S_IRUGO, isg5320a_sw_reset_show, NULL);
 static DEVICE_ATTR(normal_threshold, S_IRUGO | S_IWUSR | S_IWGRP,
 		   isg5320a_normal_threshold_show, isg5320a_normal_threshold_store);
 static DEVICE_ATTR(raw_data, S_IRUGO, isg5320a_raw_data_show, NULL);
-static DEVICE_ATTR(debug_raw_data, S_IRUGO, isg5320a_debug_raw_data_show, NULL);
-static DEVICE_ATTR(debug_data, S_IRUGO, isg5320a_debug_data_show, NULL);
 static DEVICE_ATTR(diff_avg, S_IRUGO, isg5320a_diff_avg_show, NULL);
 static DEVICE_ATTR(cdc_avg, S_IRUGO, isg5320a_cdc_avg_show, NULL);
 static DEVICE_ATTR(useful_avg, S_IRUGO, isg5320a_cdc_avg_show, NULL);
 static DEVICE_ATTR(ch_state, S_IRUGO, isg5320a_ch_state_show, NULL);
 static DEVICE_ATTR(hysteresis, S_IRUGO, isg5320a_hysteresis_show, NULL);
+static DEVICE_ATTR(sampling_freq, S_IRUGO, isg5320a_sampling_freq_show, NULL);
+static DEVICE_ATTR(isum, S_IRUGO, isg5320a_isum_show, NULL);
+static DEVICE_ATTR(scan_period, S_IRUGO, isg5320a_scan_period_show, NULL);
+static DEVICE_ATTR(analog_gain, S_IRUGO, isg5320a_again_show, NULL);
+static DEVICE_ATTR(cdc_up, S_IRUGO, isg5320a_cdc_down_coef_show, NULL);
+static DEVICE_ATTR(cdc_down, S_IRUGO, isg5320a_cdc_up_coef_show, NULL);
+static DEVICE_ATTR(temp_enable, S_IRUGO, isg5320a_temp_enable_show, NULL);
+static DEVICE_ATTR(irq_count, S_IRUGO | S_IWUSR | S_IWGRP,
+		   isg5320a_irq_count_show, isg5320a_irq_count_store);
+#if !IS_ENABLED(CONFIG_SAMSUNG_PRODUCT_SHIP)
+static DEVICE_ATTR(debug_raw_data, S_IRUGO, isg5320a_debug_raw_data_show, NULL);
+static DEVICE_ATTR(debug_data, S_IRUGO, isg5320a_debug_data_show, NULL);
 static DEVICE_ATTR(reg_update, S_IRUGO, isg5320a_reg_update_show, NULL);
 static DEVICE_ATTR(direct, S_IRUGO | S_IWUSR | S_IWGRP, isg5320a_direct_show,
 		   isg5320a_direct_store);
@@ -1432,16 +1442,8 @@ static DEVICE_ATTR(cp, S_IRUGO, isg5320a_cp_show, NULL);
 static DEVICE_ATTR(scan_int, S_IRUGO, isg5320a_scan_int_show, NULL);
 static DEVICE_ATTR(far_close_int, S_IRUGO, isg5320a_far_close_int_show, NULL);
 static DEVICE_ATTR(toggle_enable, S_IRUGO, isg5320a_toggle_enable_show, NULL);
-static DEVICE_ATTR(sampling_freq, S_IRUGO, isg5320a_sampling_freq_show, NULL);
-static DEVICE_ATTR(isum, S_IRUGO, isg5320a_isum_show, NULL);
-static DEVICE_ATTR(scan_period, S_IRUGO, isg5320a_scan_period_show, NULL);
-static DEVICE_ATTR(analog_gain, S_IRUGO, isg5320a_again_show, NULL);
-static DEVICE_ATTR(cdc_up, S_IRUGO, isg5320a_cdc_down_coef_show, NULL);
-static DEVICE_ATTR(cdc_down, S_IRUGO, isg5320a_cdc_up_coef_show, NULL);
-static DEVICE_ATTR(temp_enable, S_IRUGO, isg5320a_temp_enable_show, NULL);
 static DEVICE_ATTR(cml, S_IRUGO, isg5320a_cml_show, NULL);
-static DEVICE_ATTR(irq_count, S_IRUGO | S_IWUSR | S_IWGRP,
-		   isg5320a_irq_count_show, isg5320a_irq_count_store);
+#endif
 
 static struct device_attribute *sensor_attrs[] = {
 	&dev_attr_name,
@@ -1453,20 +1455,11 @@ static struct device_attribute *sensor_attrs[] = {
 	&dev_attr_reset,
 	&dev_attr_normal_threshold,
 	&dev_attr_raw_data,
-	&dev_attr_debug_raw_data,
-	&dev_attr_debug_data,
 	&dev_attr_diff_avg,
 	&dev_attr_useful_avg,
 	&dev_attr_cdc_avg,
 	&dev_attr_ch_state,
 	&dev_attr_hysteresis,
-	&dev_attr_reg_update,
-	&dev_attr_direct,
-	&dev_attr_intr_debug,
-	&dev_attr_cp,
-	&dev_attr_scan_int,
-	&dev_attr_far_close_int,
-	&dev_attr_toggle_enable,
 	&dev_attr_sampling_freq,
 	&dev_attr_isum,
 	&dev_attr_scan_period,
@@ -1474,8 +1467,19 @@ static struct device_attribute *sensor_attrs[] = {
 	&dev_attr_cdc_up,
 	&dev_attr_cdc_down,
 	&dev_attr_temp_enable,
-	&dev_attr_cml,
 	&dev_attr_irq_count,
+#if !IS_ENABLED(CONFIG_SAMSUNG_PRODUCT_SHIP)
+	&dev_attr_debug_raw_data,
+	&dev_attr_debug_data,
+	&dev_attr_reg_update,
+	&dev_attr_direct,
+	&dev_attr_intr_debug,
+	&dev_attr_cp,
+	&dev_attr_scan_int,
+	&dev_attr_far_close_int,
+	&dev_attr_toggle_enable,
+	&dev_attr_cml,
+#endif
 	NULL,
 };
 

@@ -127,11 +127,11 @@ void als_eol_set_env(bool torch, int intensity)
 #elif IS_ENABLED(CONFIG_LEDS_KTD2692)
 	if (torch) {
 		gpio_led = gpio_torch;
-		led_curr = 1400;
+		led_curr = 80;
 		led_mode = KTD2692_FLICKER_FLASH_MODE;
 	} else {
 		gpio_led = gpio_flash;
-		led_curr = 1400;
+		led_curr = 80;
 		led_mode = KTD2692_FLICKER_FLASH_MODE;
 	}
 #endif

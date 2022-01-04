@@ -952,13 +952,15 @@ static ssize_t max77705_muic_set_afc_disable(struct device *dev,
 
 		return -EIO;
 	} else {
+		mutex_lock(&muic_data->afc_lock);
 		pr_info("%s: afc_disable:%d (AFC %s)\n", __func__,
 			pdata->afc_disable, pdata->afc_disable ? "Disabled" : "Enabled");
 
-		if (pdata->afc_disabled_updated & MAX77705_MUIC_AFC_WORK_PROCESS)	
+		if (pdata->afc_disabled_updated & MAX77705_MUIC_AFC_WORK_PROCESS)
 			pdata->afc_disabled_updated |= MAX77705_MUIC_AFC_DISABLE_CHANGE_DURING_WORK;
 		else
 			max77705_muic_check_afc_disabled(muic_data);
+		mutex_unlock(&muic_data->afc_lock);
 	}
 
 	pr_info("%s afc_disable(%d)\n", __func__, pdata->afc_disable);
@@ -1896,6 +1898,7 @@ static void max77705_muic_afc_work(struct work_struct *work)
 	pr_info("%s\n", __func__);
 
 	if (max77705_muic_check_is_enable_afc(muic_data, muic_data->attached_dev)) {
+		mutex_lock(&muic_data->afc_lock);
 		muic_data->pdata->afc_disabled_updated |= MAX77705_MUIC_AFC_WORK_PROCESS;
 
 		if (!muic_data->pdata->afc_disable) {
@@ -1906,7 +1909,8 @@ static void max77705_muic_afc_work(struct work_struct *work)
 			muic_data->is_check_hv = true;
 			muic_data->hv_voltage = 5;
 			max77705_muic_afc_hv_set(muic_data, 5);
-		}	
+		}
+		mutex_unlock(&muic_data->afc_lock);
 	}
 }
 
@@ -1916,15 +1920,19 @@ static int max77705_muic_hv_charger_disable(bool en)
 
 	muic_data->is_charger_mode = en;
 
-	schedule_delayed_work(&(muic_data->afc_work), msecs_to_jiffies(0));
+	mutex_lock(&muic_data->afc_lock);
+	if (muic_data->pdata->afc_disabled_updated & MAX77705_MUIC_AFC_WORK_PROCESS)
+		muic_data->pdata->afc_disabled_updated |= MAX77705_MUIC_AFC_DISABLE_CHANGE_DURING_WORK;
+	else
+		schedule_delayed_work(&(muic_data->afc_work), msecs_to_jiffies(0));
+	mutex_unlock(&muic_data->afc_lock);
 
 	return 0;
 }
 
-static int max77705_muic_afc_set_voltage(int voltage)
+int __max77705_muic_afc_set_voltage(struct max77705_muic_data *muic_data, int voltage)
 {
-	struct max77705_muic_data *muic_data = g_muic_data;
-	int now_voltage = 0;
+	int now_voltage = 0, ret = 0;
 
 	switch (voltage) {
 	case 5:
@@ -1932,7 +1940,8 @@ static int max77705_muic_afc_set_voltage(int voltage)
 		break;
 	default:
 		pr_err("%s: invalid value %d, return\n", __func__, voltage);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err;
 	}
 
 	switch (muic_data->attached_dev) {
@@ -1950,7 +1959,8 @@ static int max77705_muic_afc_set_voltage(int voltage)
 
 	if (voltage == now_voltage) {
 		pr_err("%s: same with current voltage, return\n", __func__);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err;
 	}
 
 	muic_data->hv_voltage = voltage;
@@ -1966,10 +1976,35 @@ static int max77705_muic_afc_set_voltage(int voltage)
 		break;
 	default:
 		pr_err("%s: not a HV Charger %d, return\n", __func__, muic_data->attached_dev);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err;
+	}
+err:
+	return ret;
+}
+
+static int max77705_muic_afc_set_voltage(int voltage)
+{
+	struct max77705_muic_data *muic_data = g_muic_data;
+	int ret = 0;
+
+	mutex_lock(&muic_data->afc_lock);
+
+	if (muic_data->pdata->afc_disabled_updated & MAX77705_MUIC_AFC_WORK_PROCESS) {
+		muic_data->pdata->afc_disabled_updated |= MAX77705_MUIC_AFC_SET_VOLTAGE_CHANGE_DURING_WORK;
+		muic_data->reserve_hv_voltage = voltage;
+		goto skip;
 	}
 
-	return 0;
+	muic_data->pdata->afc_disabled_updated |= MAX77705_MUIC_AFC_WORK_PROCESS;
+	muic_data->reserve_hv_voltage = 0;
+
+	ret = __max77705_muic_afc_set_voltage(muic_data, voltage);
+	if (ret < 0)
+		muic_data->pdata->afc_disabled_updated &= MAX77705_MUIC_AFC_WORK_PROCESS_END;
+skip:
+	mutex_unlock(&muic_data->afc_lock);
+	return ret;
 }
 
 static int max77705_muic_hv_charger_init(void)
@@ -2398,6 +2433,7 @@ int max77705_muic_probe(struct max77705_usbc_platform_data *usbc_data)
 #endif /* CONFIG_OF */
 
 	mutex_init(&muic_data->muic_mutex);
+	mutex_init(&muic_data->afc_lock);
 	muic_data->muic_ws = wakeup_source_register(usbc_data->dev, "muic-irq");
 #if IS_ENABLED(CONFIG_MUIC_AFC_RETRY)
 	muic_data->afc_retry_ws = wakeup_source_register(usbc_data->dev, "muic-afc-retry");
@@ -2632,7 +2668,7 @@ int max77705_muic_suspend(struct max77705_usbc_platform_data *usbc_data)
 	struct max77705_muic_data *muic_data = usbc_data->muic_data;
 
 	pr_info("%s\n", __func__);
-	cancel_delayed_work(&(muic_data->debug_work));
+	cancel_delayed_work_sync(&(muic_data->debug_work));
 
 	return 0;
 }

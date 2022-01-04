@@ -75,7 +75,7 @@ static inline s32 read_data(struct i2c_client *client,
 
 retry:
 	/* select register*/
-	ret = i2c_master_send(client , (u8 *)&reg , 2);
+	ret = i2c_master_send(client, (u8 *)&reg, 2);
 	if (ret < 0) {
 		input_err(true, &info->client->dev, "%s: send failed %d, retry %d\n", __func__, ret, count);
 		usleep_range(1 * 1000, 1 * 1000);
@@ -88,7 +88,7 @@ retry:
 	}
 	/* for setup tx transaction. */
 	usleep_range(DELAY_FOR_TRANSCATION, DELAY_FOR_TRANSCATION);
-	ret = i2c_master_recv(client , values , length);
+	ret = i2c_master_recv(client, values, length);
 	if (ret < 0) {
 		input_err(true, &info->client->dev, "%s: recv failed %d, retry %d\n", __func__, ret, count_recv);
 
@@ -2765,13 +2765,13 @@ static int zt75xx_ts_set_utc_to_sponge(struct zt75xx_ts_info *info)
 	ktime_get_real_ts64(&current_time);
 	utc_data[0] = (u16)(current_time.tv_sec & 0xFFFF);
 	utc_data[1] = (u16)((current_time.tv_sec >> 16) & 0xFFFF);
-		
+
 	retval = write_reg(info->client, ZT75XX_LPDUMP_UTC_VAL_LSB_REG, utc_data[0]);
 	if (retval != I2C_SUCCESS) {
 		input_err(true, &info->client->dev, "%s: Fail to set ZT75XX_LPDUMP_UTC_VAL_LSB_REG\n", __func__);
 		return retval;
 	}
-			
+
 	retval = write_reg(info->client, ZT75XX_LPDUMP_UTC_VAL_MSB_REG, utc_data[1]);
 	if (retval != I2C_SUCCESS)
 		input_err(true, &info->client->dev, "%s: Fail to set ZT75XX_LPDUMP_UTC_VAL_MSB_REG\n", __func__);
@@ -3536,16 +3536,15 @@ static void fw_update(void *device_data)
 	struct zt75xx_ts_info *info = container_of(sec, struct zt75xx_ts_info, sec);
 	struct zt75xx_ts_platform_data *pdata = info->pdata;
 	struct i2c_client *client = info->client;
-	const u8 *buff = 0;
-	mm_segment_t old_fs = {0};
-	struct file *fp = NULL;
-	long fsize = 0, nread = 0;
 	char fw_path[MAX_FW_PATH+1];
 	char result[16] = {0};
 	const struct firmware *tsp_fw = NULL;
-	unsigned char *fw_data = NULL;
 	int restore_cal = 0;
 	int ret;
+#if IS_ENABLED(CONFIG_SAMSUNG_PRODUCT_SHIP) && IS_ENABLED(CONFIG_SPU_VERIFY)
+	int ori_size;
+	int spu_ret;
+#endif
 
 	sec_cmd_set_default_result(sec);
 
@@ -3576,13 +3575,12 @@ static void fw_update(void *device_data)
 			snprintf(result, sizeof(result), "%s", "NG");
 			goto err;
  		}
-		fw_data = (unsigned char *)tsp_fw->data;
 
 #ifdef TCLM_CONCEPT
 		sec_tclm_root_of_cal(info->tdata, CALPOSITION_TESTMODE);
 		restore_cal = 1;
 #endif
-		ret = ts_upgrade_sequence(info, (u8*)fw_data, restore_cal);
+		ret = ts_upgrade_sequence(info, tsp_fw->data, restore_cal);
 		release_firmware(tsp_fw);
 		if (ret < 0) {
 			sec->cmd_state = SEC_CMD_STATUS_FAIL;
@@ -3592,58 +3590,43 @@ static void fw_update(void *device_data)
 		break;
 
 	case UMS:
-		old_fs = get_fs();
-		set_fs(KERNEL_DS);
-
-		snprintf(fw_path, MAX_FW_PATH, "/sdcard/Firmware/TSP/%s", TSP_FW_FILENAME);
-		fp = filp_open(fw_path, O_RDONLY, 0);
-		if (IS_ERR(fp)) {
+#if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+		snprintf(fw_path, MAX_FW_PATH, "%s", TSP_EXTERNAL_FW);
+#else
+		snprintf(fw_path, MAX_FW_PATH, "%s", TSP_EXTERNAL_FW_SIGNED);
+#endif
+		ret = request_firmware(&tsp_fw, fw_path, &(client->dev));
+		if (ret) {
 			input_err(true, &client->dev,
-				"file %s open error\n", fw_path);
+				"%s: Firmware image %s not available\n", __func__, fw_path);
 			sec->cmd_state = SEC_CMD_STATUS_FAIL;
 			snprintf(result, sizeof(result), "%s", "NG");
-			goto err_open;
+			goto err;
 		}
 
-		fsize = fp->f_path.dentry->d_inode->i_size;
-		if (fsize != info->cap_info.ic_fw_size) {
-			input_err(true, &client->dev, "%s: invalid fw size!!\n", __func__);
-			sec->cmd_state = SEC_CMD_STATUS_FAIL;
-			snprintf(result, sizeof(result), "%s", "NG");
-			goto err_open;
-		}
+#if IS_ENABLED(CONFIG_SAMSUNG_PRODUCT_SHIP) && IS_ENABLED(CONFIG_SPU_VERIFY)
+		ori_size = tsp_fw->size - SPU_METADATA_SIZE(TSP);
 
-		buff = kzalloc((size_t)fsize, GFP_KERNEL);
-		if (!buff) {
-			input_err(true, &client->dev, "%s: failed to alloc buffer for fw\n", __func__);
-			sec->cmd_state = SEC_CMD_STATUS_FAIL;
-			snprintf(result, sizeof(result), "%s", "NG");
-			goto err_alloc;
+		spu_ret = spu_firmware_signature_verify("TSP", tsp_fw->data, tsp_fw->size);
+		if (ori_size != spu_ret) {
+			input_err(true, &client->dev, "%s: signature verify failed, ori:%d, fsize:%ld\n",
+					__func__, ori_size, tsp_fw->size);
+			release_firmware(tsp_fw);
+			goto err;
 		}
-
-		nread = fp->f_op->read(fp, (char __user *)buff, fsize, &fp->f_pos);
-		if (nread != fsize) {
-			input_err(true, &client->dev,
-					"%s: failed to read firmware file, nread %ld != %ld Bytes\n",
-					__func__, nread, fsize);
-			sec->cmd_state = SEC_CMD_STATUS_FAIL;
-			snprintf(result, sizeof(result), "%s", "NG");
-			goto err_fw_size;
-		}
-		input_info(true, &client->dev, "%s: ums fw is loaded!!\n", __func__);
-
+#endif
 #ifdef TCLM_CONCEPT
 		sec_tclm_root_of_cal(info->tdata, CALPOSITION_TESTMODE);
 		restore_cal = 1;
 #endif
-		ret = ts_upgrade_sequence(info, (u8*)buff, restore_cal);
+		ret = ts_upgrade_sequence(info, tsp_fw->data, restore_cal);
+		release_firmware(tsp_fw);
 		if (ret < 0) {
 			sec->cmd_state = SEC_CMD_STATUS_FAIL;
 			snprintf(result, sizeof(result), "%s", "NG");
-			goto err_fw_size;
+			goto err;
 		}
 		break;
-
 	default:
 		input_err(true, &client->dev, "%s: invalid fw file type!!\n", __func__);
 		sec->cmd_state = SEC_CMD_STATUS_FAIL;
@@ -3654,14 +3637,6 @@ static void fw_update(void *device_data)
 	sec->cmd_state = SEC_CMD_STATUS_OK;
 	snprintf(result, sizeof(result), "%s", "OK");
 
-	if (fp != NULL) {
-err_fw_size:
-		kfree(buff);
-err_alloc:
-		filp_close(fp, NULL);
-err_open:
-		set_fs(old_fs);
-	}
 err:
 #ifdef TCLM_CONCEPT
 	sec_tclm_root_of_cal(info->tdata, CALPOSITION_NONE);
@@ -8889,7 +8864,7 @@ static u16 ts_get_touch_reg(u16 addr)
 
 	ret = read_data(misc_info->client, addr, (u8 *)&reg_value, 2);
 	if (ret < 0) {
-		input_err(true, &misc_info->client->dev,"%s: fail read touch reg\n", __func__);
+		input_err(true, &misc_info->client->dev, "%s: fail read touch reg\n", __func__);
 	}
 
 	misc_info->work_state = NOTHING;
@@ -8918,7 +8893,7 @@ static void ts_set_touch_reg(u16 addr, u16 value)
 	write_reg(misc_info->client, 0x0A, 0x0A);
 
 	if (write_reg(misc_info->client, addr, value) != I2C_SUCCESS)
-		input_err(true, &misc_info->client->dev,"%s: fail write touch reg\n", __func__);
+		input_err(true, &misc_info->client->dev, "%s: fail write touch reg\n", __func__);
 
 	misc_info->work_state = NOTHING;
 	enable_irq(misc_info->irq);
@@ -10181,7 +10156,7 @@ static int zt75xx_ts_probe(struct i2c_client *client,
 	int lcdtype = 0;
 #endif
 
-#if IS_ENABLED(CONFIG_BATTERY_SAMSUNG) 
+#if IS_ENABLED(CONFIG_BATTERY_SAMSUNG)
 	if (lpcharge == 1) {
 		input_err(true, &client->dev, "%s : Do not load driver due to : lpm %d\n",
 				__func__, lpcharge);

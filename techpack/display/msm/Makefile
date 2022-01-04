@@ -98,7 +98,8 @@ msm_drm-$(CONFIG_DRM_MSM_SDE) += sde/sde_crtc.o \
 
 msm_drm-$(CONFIG_DRM_SDE_VM) += sde/sde_vm_common.o \
 	sde/sde_vm_primary.o \
-	sde/sde_vm_trusted.o
+	sde/sde_vm_trusted.o \
+	sde/sde_vm_msgq.o
 
 msm_drm-$(CONFIG_DRM_SDE_WB) += sde/sde_wb.o \
 	sde/sde_encoder_phys_wb.o
@@ -233,7 +234,11 @@ msm_drm-$(CONFIG_DISPLAY_SAMSUNG) += samsung/SELF_DISPLAY/self_display_6W3.o \
 	samsung/SELF_DISPLAY/self_display_XA1.o \
 	samsung/SELF_DISPLAY/self_display_XA2.o \
 	samsung/SELF_DISPLAY/self_display_FC1.o \
+	samsung/SELF_DISPLAY/self_display_SW83109.o \
+	samsung/SELF_DISPLAY/self_display_SW83109_WM6676Z21.o \
+	samsung/SELF_DISPLAY/self_display_HAB_AMB667AN01.o \
 	samsung/SELF_DISPLAY/self_display_FC3.o
+
 
 msm_drm-$(CONFIG_DISPLAY_SAMSUNG) += samsung/MAFPC/ss_dsi_mafpc_FAB.o \
 	samsung/MAFPC/ss_dsi_mafpc_HAB.o \

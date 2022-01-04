@@ -8,6 +8,7 @@ SAFEPLACE_ENABLE=true
 IMMUTABLE_ENABLE=true
 LP_ENABLE=true
 UMH_RESTRICTION_ENABLE=true
+TRUSTED_MAP_ENABLE=false
 
 ifneq ($(wildcard $(srctree)/include/crypto/internal/rsa.h),)
     $(warning [DEFEX] INTEGRITY_ENABLE)
@@ -47,6 +48,7 @@ ifeq ($(CONFIG_DEFEX_KERNEL_ONLY), y)
         defex-y += debug/defex_debug.o
         defex-y += core/defex_sysfs.o
         DEFEX_DEFINES += -DDEFEX_PERMISSIVE_SP
+        DEFEX_DEFINES += -DDEFEX_PERMISSIVE_TM
         DEFEX_DEFINES += -DDEFEX_PERMISSIVE_IM
         DEFEX_DEFINES += -DDEFEX_PERMISSIVE_LP
         DEFEX_DEFINES += -DDEFEX_DEBUG_ENABLE
@@ -102,10 +104,23 @@ ifeq ($(SIGN_ENABLE), true)
 endif
 endif
 
+ifeq ($(TRUSTED_MAP_ENABLE), true)
+    DEFEX_DEFINES += -DDEFEX_TRUSTED_MAP_ENABLE
+    DEFEX_DEFINES += -DDEFEX_PERMISSIVE_TM
+    #DEFEX_DEFINES += -DDEFEX_TM_DEFAULT_POLICY_ENABLE
+    ###defex-y += feature_trusted_map/defex_trusted_map.o
+    defex-y += feature_trusted_map/dtm.o
+    ###defex-y += feature_trusted_map/dtm_engine.o
+    ###defex-y += feature_trusted_map/dtm_log.o
+    ###defex-y += feature_trusted_map/dtm_utils.o
+    ###defex-y += feature_trusted_map/ptree.o
+endif
+
 ifneq (,$(filter userdebug eng, $(TARGET_BUILD_VARIANT)))
     defex-y += debug/defex_debug.o
     defex-y += core/defex_sysfs.o
     DEFEX_DEFINES += -DDEFEX_PERMISSIVE_SP
+    DEFEX_DEFINES += -DDEFEX_PERMISSIVE_TM
     DEFEX_DEFINES += -DDEFEX_PERMISSIVE_IM
     DEFEX_DEFINES += -DDEFEX_PERMISSIVE_LP
     DEFEX_DEFINES += -DDEFEX_DEBUG_ENABLE
@@ -133,13 +148,11 @@ EXTRA_AFLAGS += -Isecurity/samsung/defex_lsm/cert
 ifneq ($(wildcard  $(srctree)/$(src)/pack_rules.c),)
     EXTRA_CFLAGS += $(DEFEX_DEFINES)
     EXTRA_AFLAGS += $(DEFEX_DEFINES)
+    hostprogs := pack_rules
     hostprogs-y := pack_rules
     HOST_EXTRACFLAGS += $(DEFEX_DEFINES)
     clean-files := $(srctree)/$(src)/defex_packed_rules.inc
     DEPEND_LIST := $(obj)/pack_rules
-
-    quiet_cmd_copy = COPY    $(obj)/pack_rules
-          cmd_copy = cp -n $(obj)/pack_rules $(srctree)/$(src)/pack_rules 2>/dev/null || true
 
     quiet_cmd_pack = PACK    $<
           cmd_pack = $(obj)/pack_rules -p $< $@ $(srctree)/$(src)/defex_packed_rules.bin
@@ -174,7 +187,7 @@ ifneq ($(wildcard  $(srctree)/$(src)/pack_rules.c),)
 
     $(srctree)/$(src)/defex_packed_rules.inc: $(SOURCE_RULES) $(DEPEND_LIST)
 	$(call cmd,pack)
-	$(call cmd,copy)
+	@cp -n $(obj)/pack_rules $(srctree)/$(src)/pack_rules 2>/dev/null || true
 
 else
     EXTRA_CFLAGS += $(DEFEX_DEFINES)

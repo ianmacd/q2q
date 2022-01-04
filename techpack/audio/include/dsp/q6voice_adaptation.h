@@ -40,6 +40,7 @@
 
 #define VOICE_ECHO_REF_LCH_MUTE_PARAM       0x10001028
 #define VOICE_NREC_MODE_DYNAMIC_PARAM       0x10001029
+#define ENHANCED_VT_CALL_DYNAMIC_PARAM       0x1000102A
 
 #define VOICE_MODULE_SET_DEVICE				0x10041000
 #define VOICE_MODULE_SET_DEVICE_PARAM		0x10041001
@@ -159,6 +160,11 @@ struct cvp_set_voice_remote_mic_cmd {
 	struct vss_icommon_cmd_set_ui_property_v2_t cvp_set_voice_remote_mic;
 } __packed;
 
+struct cvp_set_voice_isolation_cmd {
+	struct apr_hdr hdr;
+	struct vss_icommon_cmd_set_ui_property_v2_t cvp_set_voice_isolation;
+} __packed;
+
 int sec_voice_set_adaptation_sound(uint16_t mode,
 	uint16_t select, int16_t *parameters);
 int sec_voice_set_nb_mode(short enable);
@@ -173,4 +179,5 @@ int sec_voice_get_loopback_enable(void);
 void sec_voice_set_loopback_enable(int mode);
 void voice_sec_loopback_start_cmd(u32 session_id);
 void voice_sec_loopback_end_cmd(u32 session_id);
+int sec_voice_isolation_mode(short mode);
 #endif /* __Q6VOICE_ADAPTATION_H */
