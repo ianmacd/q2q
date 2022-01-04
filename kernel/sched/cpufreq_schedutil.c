@@ -13,6 +13,7 @@
 #include <linux/sched/cpufreq.h>
 #include <trace/events/power.h>
 #include <linux/sched/sysctl.h>
+#include <trace/hooks/sched.h>
 
 #define IOWAIT_BOOST_MIN	(SCHED_CAPACITY_SCALE / 8)
 
@@ -267,10 +268,12 @@ static void sugov_deferred_update(struct sugov_policy *sg_policy, u64 time,
 
 	if (use_pelt())
 		sg_policy->work_in_progress = true;
-	irq_work_queue(&sg_policy->irq_work);
+	walt_irq_work_queue(&sg_policy->irq_work);
 }
 
 #define TARGET_LOAD 80
+#define TARGET_LOAD_PL 90
+
 /**
  * get_next_freq - Compute a new frequency for a given cpufreq policy.
  * @sg_policy: schedutil policy object to compute the new frequency for.
@@ -299,10 +302,15 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 	struct cpufreq_policy *policy = sg_policy->policy;
 	unsigned int freq = arch_scale_freq_invariant() ?
 				policy->cpuinfo.max_freq : policy->cur;
+	unsigned long next_freq = 0;
 
-	freq = map_util_freq(util, freq, max);
+	trace_android_vh_map_util_freq(util, freq, max, &next_freq);
+	if (next_freq)
+		freq = next_freq;
+	else
+		freq = map_util_freq(util, freq, max);
+
 	trace_sugov_next_freq(policy->cpu, util, max, freq);
-
 	if (freq == sg_policy->cached_raw_freq && !sg_policy->need_freq_update)
 		return sg_policy->next_freq;
 
@@ -338,7 +346,7 @@ unsigned long schedutil_cpu_util(int cpu, unsigned long util_cfs,
 	unsigned long dl_util, util, irq;
 	struct rq *rq = cpu_rq(cpu);
 
-	if (!IS_BUILTIN(CONFIG_UCLAMP_TASK) && sched_feat(SUGOV_RT_MAX_FREQ) &&
+	if (!uclamp_is_used() && sched_feat(SUGOV_RT_MAX_FREQ) &&
 	    type == FREQUENCY_UTIL && rt_rq_is_runnable(&rq->rt)) {
 		return max;
 	}
@@ -614,7 +622,7 @@ static void sugov_walt_adjust(struct sugov_cpu *sg_cpu, unsigned long *util,
 
 	if (sg_policy->tunables->pl) {
 		if (conservative_pl())
-			pl = mult_frac(pl, TARGET_LOAD, 100);
+			pl = mult_frac(pl, TARGET_LOAD_PL, 100);
 		*util = max(*util, pl);
 	}
 }

@@ -152,6 +152,11 @@
 	{feature_safeplace_path,"/vendor/bin/hw/vendor.qti.hardware.perf@2.1-service"},
 	{feature_safeplace_path,"/vendor/bin/hw/vendor.qti.hardware.perf@2.2-service"},
 	{feature_safeplace_path,"/vendor/bin/grep"},
+	{feature_safeplace_path,"/vendor/bin/memlogd"},
+	{feature_safeplace_path,"/vendor/bin/init.insmod.sh"},
+	{feature_safeplace_path,"/vendor/bin/dsmsca"},
+	{feature_safeplace_path,"/vendor/bin/hw/android.hardware.usb@1.3-service.coral"},
+	{feature_safeplace_path,"/vendor/bin/hw/vendor.qti.hardware.perf-hal-service"},
 	{feature_safeplace_path,"/system/bin/rdxd"},
 	{feature_safeplace_path,"/system/system_ext/bin/dpmd"},
 	{feature_safeplace_path,"/vendor/bin/init.qti.dcvs.sh"},
@@ -164,6 +169,7 @@
 	{feature_safeplace_path,"/vendor/bin/init.kernel.post_boot.sh"},
 	{feature_safeplace_path,"/vendor/bin/init.kernel.post_boot-lahaina.sh"},
 	{feature_safeplace_path,"/vendor/bin/init.qti.keymaster.sh"},
+	{feature_safeplace_path,"/vendor/bin/init.qti.early_init.sh"},
 	{feature_safeplace_path,"/vendor/bin/thermal_manager"},
 	{feature_safeplace_path,"/system/bin/linkerconfig"},
 	{feature_safeplace_path,"/system/bin/snapshotctl"},
@@ -189,10 +195,19 @@
 	{feature_safeplace_path,"/product/bin/dmabuf_dump"},
 	{feature_safeplace_path,"/apex/com.android.runtime/bin/spqr"},
 	{feature_safeplace_path,"/system/bin/perfetto"},
-	{feature_safeplace_path,"/tmp/update_binary"},
+	{feature_safeplace_path,"/system/bin/update_verifier"},
+	{feature_safeplace_path,"/system/bin/bootstrap/linkerconfig"},
+	{feature_safeplace_path,"/apex/com.android.runtime/bin/linkerconfig"},
+	{feature_safeplace_path,"/system/bin/otapreopt_slot"},
+	{feature_safeplace_path,"/apex/com.android.art/bin/dex2oat32"},
+	{feature_safeplace_path,"/apex/com.android.art/bin/dex2oat64"},
+	{feature_safeplace_path,"/system/bin/incident"},
+	{feature_safeplace_path,"/tmp/update_binary;updater_intermediates/updater;obj/EXECUTABLES"},
 	{feature_safeplace_path,"/tmp/update-binary"},
 	{feature_safeplace_path,"/system/bin/install-recovery.sh"},	/* DEFAULT */
 	{feature_safeplace_path,"/vendor/bin/install-recovery.sh"},	/* DEFAULT */
+	{feature_safeplace_path,"/system/bin/odsign"},	/* DEFAULT */
+	{feature_safeplace_path,"/apex/com.android.art/bin/odrefresh"},	/* DEFAULT */
 	{feature_immutable_path_write,"/system/"},	/* DEFAULT */
 	{feature_immutable_path_write,"/vendor/"},	/* DEFAULT */
 	{feature_immutable_path_open,"/system/bin/"},	/* DEFAULT */
@@ -214,6 +229,7 @@
 	{feature_immutable_src_exception,"/vendor/bin/iof_vendor"},
 	{feature_immutable_src_exception,"/init"},
 	{feature_immutable_src_exception,"/system/bin/init"},
+	{feature_immutable_src_exception,"/system/bin/lshal"},
 	/* Rules will be added here */
 	/* Never modify the above line. Rules will be added for buildtime */
 #endif /* if 0 */

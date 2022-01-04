@@ -251,6 +251,20 @@ static enum pon_restart_reason __pon_restart_dump_sink(
 	return PON_RESTART_REASON_UNKNOWN;
 }
 
+static enum pon_restart_reason __pon_restart_cdsp_signoff(
+				unsigned long opt_code)
+{
+	switch (opt_code) {
+	case CDSP_SIGNOFF_ON:
+		return PON_RESTART_REASON_CDSP_ON;
+	case CDSP_SIGNOFF_BLOCK:
+		return PON_RESTART_REASON_CDSP_BLOCK;
+	}
+
+	return PON_RESTART_REASON_UNKNOWN;
+}
+
+
 #ifdef CONFIG_MUIC_SUPPORT_RUSTPROOF
 static enum pon_restart_reason __pon_restart_swsel(
 				unsigned long opt_code)
@@ -386,10 +400,16 @@ void sec_debug_update_restart_reason(const char *cmd, const int in_panic,
 		{ "dump_sink",
 			PON_RESTART_REASON_UNKNOWN,
 			RESTART_REASON_NORMAL, __pon_restart_dump_sink},
+		{ "signoff",
+			PON_RESTART_REASON_UNKNOWN,
+			RESTART_REASON_NORMAL, __pon_restart_cdsp_signoff},
 		{ "cross_fail",
 			PON_RESTART_REASON_CROSS_FAIL,
 			RESTART_REASON_NORMAL, NULL},
 		{ "from_fastboot",
+			PON_RESTART_REASON_NORMALBOOT,
+			RESTART_REASON_NOT_HANDLE, NULL},
+		{ "disallow,fastboot",
 			PON_RESTART_REASON_NORMALBOOT,
 			RESTART_REASON_NOT_HANDLE, NULL},
 #ifdef CONFIG_MUIC_SUPPORT_RUSTPROOF
@@ -844,7 +864,7 @@ static int __init sec_debug_init(void)
 	case ANDROID_DEBUG_LEVEL_MID:
 #endif
 
-#if defined(CONFIG_SEC_A52Q_PROJECT) || defined(CONFIG_SEC_A72Q_PROJECT)
+#if defined(CONFIG_ARCH_ATOLL) || defined(CONFIG_ARCH_SEC_SM7150)
 		if (!force_upload)
 			qcom_scm_disable_sdi();
 #endif

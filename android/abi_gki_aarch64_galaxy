@@ -1103,9 +1103,11 @@
   gpiochip_generic_free
   gpiochip_generic_request
   gpiochip_get_data
+  gpiochip_irqchip_add_key
   gpiochip_line_is_valid
   gpiochip_lock_as_irq
   gpiochip_remove
+  gpiochip_set_nested_irqchip
   gpiochip_unlock_as_irq
   gpiod_direction_input
   gpiod_direction_output
@@ -1972,6 +1974,7 @@
   regulator_unlock
   regulator_unregister_notifier
   regulatory_hint
+  regulatory_set_wiphy_regd_sync_rtnl
   release_firmware
   release_sock
   regmap_mmio_detach_clk

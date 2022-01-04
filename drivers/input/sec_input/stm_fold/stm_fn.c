@@ -901,7 +901,8 @@ void stm_ts_reset_work(struct work_struct *work)
 		/* for ACT i2c recovery fail test */
 		snprintf(test, sizeof(test), "TEST=RECOVERY");
 		snprintf(result, sizeof(result), "RESULT=FAIL");
-		sec_cmd_send_event_to_user(&ts->sec, test, result);
+		if (ts->probe_done)
+			sec_cmd_send_event_to_user(&ts->sec, test, result);
 
 		input_err(true, &ts->client->dev, "%s: failed to reset, ret:%d\n", __func__, ret);
 		ts->reset_is_on_going = false;
@@ -911,7 +912,8 @@ void stm_ts_reset_work(struct work_struct *work)
 		mutex_unlock(&ts->modechange);
 
 		snprintf(result, sizeof(result), "RESULT=RESET");
-		sec_cmd_send_event_to_user(&ts->sec, NULL, result);
+		if (ts->probe_done)
+			sec_cmd_send_event_to_user(&ts->sec, NULL, result);
 
 		__pm_relax(ts->plat_data->sec_ws);
 
@@ -948,7 +950,8 @@ void stm_ts_reset_work(struct work_struct *work)
 			stm_ts_fix_active_mode(ts, 1);
 
 	snprintf(result, sizeof(result), "RESULT=RESET");
-	sec_cmd_send_event_to_user(&ts->sec, NULL, result);
+	if (ts->probe_done)
+		sec_cmd_send_event_to_user(&ts->sec, NULL, result);
 
 	__pm_relax(ts->plat_data->sec_ws);
 }

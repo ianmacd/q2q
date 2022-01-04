@@ -95,8 +95,9 @@ EXPORT_SYMBOL_GPL(module_mutex);
 static LIST_HEAD(modules);
 
 /* Work queue for freeing init sections in success case */
-static struct work_struct init_free_wq;
-static struct llist_head init_free_list;
+static void do_free_init(struct work_struct *w);
+static DECLARE_WORK(init_free_wq, do_free_init);
+static LLIST_HEAD(init_free_list);
 
 #ifdef CONFIG_MODULES_TREE_LOOKUP
 
@@ -3644,14 +3645,6 @@ static void do_free_init(struct work_struct *w)
 	}
 }
 
-static int __init modules_wq_init(void)
-{
-	INIT_WORK(&init_free_wq, do_free_init);
-	init_llist_head(&init_free_list);
-	return 0;
-}
-module_init(modules_wq_init);
-
 /*
  * This is where the real work happens.
  *
@@ -3915,6 +3908,10 @@ static int load_module(struct load_info *info, const char __user *uargs,
 	long err = 0;
 	char *after_dashes;
 
+#ifdef CONFIG_FASTUH_RKP
+	struct module_info rkp_mod_info;
+#endif
+
 	err = elf_header_check(info);
 	if (err)
 		goto free_copy;
@@ -4071,6 +4068,17 @@ static int load_module(struct load_info *info, const char __user *uargs,
 	mutex_lock(&module_mutex);
 	module_bug_cleanup(mod);
 	mutex_unlock(&module_mutex);
+
+#ifdef CONFIG_FASTUH_RKP
+    rkp_mod_info.base_va = 0;
+    rkp_mod_info.vm_size = 0;
+    rkp_mod_info.core_base_va = (u64)mod->core_layout.base;
+    rkp_mod_info.core_text_size = (u64)mod->core_layout.text_size;
+    rkp_mod_info.core_ro_size = (u64)mod->core_layout.ro_size;
+    rkp_mod_info.init_base_va = (u64)mod->init_layout.base;
+    rkp_mod_info.init_text_size = (u64)mod->init_layout.text_size;
+    fastuh_call(FASTUH_APP_RKP, RKP_MODULE_LOAD, RKP_MODULE_PXN_SET, (u64)&rkp_mod_info, 0, 0);
+#endif
 
  ddebug_cleanup:
 	/* Clean up CFI for the module. */

@@ -987,7 +987,6 @@ void snd_usb_unlock_shutdown(struct snd_usb_audio *chip)
 
 int snd_usb_autoresume(struct snd_usb_audio *chip)
 {
-	pr_info("%s : ++!\n", __func__);
 	if (atomic_read(&chip->shutdown))
 		return -EIO;
 	if (atomic_inc_return(&chip->active) == 1)
@@ -997,7 +996,6 @@ int snd_usb_autoresume(struct snd_usb_audio *chip)
 
 void snd_usb_autosuspend(struct snd_usb_audio *chip)
 {
-	pr_info("%s : --!\n", __func__);
 	if (atomic_read(&chip->shutdown))
 		return;
 	if (atomic_dec_and_test(&chip->active))

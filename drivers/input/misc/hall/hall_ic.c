@@ -40,13 +40,23 @@
 #include <linux/usb_notify.h>
 #endif
 #endif
+#if IS_ENABLED(CONFIG_SAMSUNG_TUI)
+#include <linux/input/stui_inf.h>
+#endif
+
 /*
  * Switch events
  */
 #define SW_FOLDER		0x00  /* set = folder open, close*/
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
+#define SW_FLIP			0x10  /* set = flip cover open, close*/
+#define SW_CERTIFYHALL		0x0b  /* set = certify_hall attach/detach */
+#define SW_WACOM_HALL			0x0c	/* set = tablet wacom hall attach/detach(set wacom cover mode) */
+#else
 #define SW_FLIP			0x15  /* set = flip cover open, close*/
 #define SW_CERTIFYHALL		0x1b  /* set = certify_hall attach/detach */
 #define SW_WACOM_HALL			0x1e	/* set = tablet wacom hall attach/detach(set wacom cover mode) */
+#endif
 
 #define DEFAULT_DEBOUNCE_INTERVAL	50
 
@@ -264,6 +274,10 @@ static void hall_ic_work(struct work_struct *work)
 #endif
 	mutex_unlock(&gddata->lock);
 
+#if IS_ENABLED(CONFIG_SAMSUNG_TUI)
+	if (STUI_MODE_TOUCH_SEC & stui_get_mode())
+		stui_cancel_session();
+#endif
 #if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
 #if IS_ENABLED(CONFIG_USB_HW_PARAM)
 	if (strncmp(hall->name, "flip", 4) == 0) {
@@ -455,6 +469,7 @@ static struct hall_ic_pdata *hall_ic_parsing_dt(struct device *dev)
 		}
 
 		hall->active_low = flags & OF_GPIO_ACTIVE_LOW;
+		gpio_direction_input(hall->gpio);
 		hall->irq = gpio_to_irq(hall->gpio);
 		hall->name = of_get_property(pp, "name", NULL);
 
@@ -465,6 +480,20 @@ static struct hall_ic_pdata *hall_ic_parsing_dt(struct device *dev)
 			pr_err("failed to get event: 0x%x\n", hall->event);
 			return ERR_PTR(-EINVAL);
 		}
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
+		if (hall->event == 0x15) { /* SW_FLIP */
+			hall->event = 0x10;
+		} else if (hall->event == 0x1b) {	/* SW_CERTIFYHALL */
+			hall->event = 0x0b;
+		} else if (hall->event == 0x1e) {	/* SW_WACOM_HALL */
+			hall->event = 0x0c;
+		} else if (hall->event == 0x00) {	/* SW_FOLSW_FLIPDER */
+			continue;
+		} else {
+			pr_err("failed to get name, not match event\n");
+			return ERR_PTR(-EINVAL);
+		}
+#endif
 		list_add(&hall->list, &hall_ic_list);
 	}
 	return pdata;

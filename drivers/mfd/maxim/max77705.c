@@ -35,11 +35,20 @@
 #include <linux/version.h>
 
 #include <linux/muic/muic.h>
+#if defined(CONFIG_MAX77705_FW_SEPARATION_PID_BY_MODEL)
+#include <linux/mfd/firmware/max77705C_pass2_specific.h>
+#if defined(CONFIG_MAX77705_USE_EXTRA_FW)
+#include <linux/mfd/firmware/max77705C_pass2_extra1.h>
+#endif
+#else
 #if defined(CONFIG_MAX77705_FW_PID03_SUPPORT)
 #include <linux/mfd/max77705C_pass2_PID03.h>
+#if defined(CONFIG_MAX77705_USE_EXTRA_FW)
 #include <linux/mfd/max77705_extra.h>
+#endif
 #else
 #include <linux/mfd/max77705C_pass2.h>
+#endif
 #endif
 
 #include <linux/usb_notify.h>
@@ -140,7 +149,11 @@ int max77705_read_reg(struct i2c_client *i2c, u8 reg, u8 *dest)
 #endif
 
 #if IS_ENABLED(CONFIG_SEC_ABC) && IS_ENABLED(CONFIG_ABC_IFPMIC_EVENT)
-		sec_abc_send_event("MODULE=pdic@ERROR=i2c_fail");
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=pdic@INFO=i2c_fail");
+#else
+		sec_abc_send_event("MODULE=pdic@WARN=i2c_fail");
+#endif
 #endif
 
 		return ret;
@@ -176,7 +189,11 @@ int max77705_bulk_read(struct i2c_client *i2c, u8 reg, int count, u8 *buf)
 #endif
 
 #if IS_ENABLED(CONFIG_SEC_ABC) && IS_ENABLED(CONFIG_ABC_IFPMIC_EVENT)
-		sec_abc_send_event("MODULE=pdic@ERROR=i2c_fail");
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=pdic@INFO=i2c_fail");
+#else
+		sec_abc_send_event("MODULE=pdic@WARN=i2c_fail");
+#endif
 #endif
 
 		return ret;
@@ -211,7 +228,11 @@ int max77705_read_word(struct i2c_client *i2c, u8 reg)
 
 #if IS_ENABLED(CONFIG_SEC_ABC) && IS_ENABLED(CONFIG_ABC_IFPMIC_EVENT)
 	if (ret < 0)
-		sec_abc_send_event("MODULE=pdic@ERROR=i2c_fail");
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=pdic@INFO=i2c_fail");
+#else
+		sec_abc_send_event("MODULE=pdic@WARN=i2c_fail");
+#endif
 #endif
 
 	return ret;
@@ -257,7 +278,11 @@ int max77705_write_reg(struct i2c_client *i2c, u8 reg, u8 value)
 
 #if IS_ENABLED(CONFIG_SEC_ABC) && IS_ENABLED(CONFIG_ABC_IFPMIC_EVENT)
 	if (ret < 0)
-		sec_abc_send_event("MODULE=pdic@ERROR=i2c_fail");
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=pdic@INFO=i2c_fail");
+#else
+		sec_abc_send_event("MODULE=pdic@WARN=i2c_fail");
+#endif
 #endif
 
 	return ret;
@@ -294,7 +319,11 @@ int max77705_write_reg_nolock(struct i2c_client *i2c, u8 reg, u8 value)
 
 #if IS_ENABLED(CONFIG_SEC_ABC) && IS_ENABLED(CONFIG_ABC_IFPMIC_EVENT)
 	if (ret < 0)
-		sec_abc_send_event("MODULE=pdic@ERROR=i2c_fail");
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=pdic@INFO=i2c_fail");
+#else
+		sec_abc_send_event("MODULE=pdic@WARN=i2c_fail");
+#endif
 #endif
 
 	return ret;
@@ -340,7 +369,11 @@ int max77705_bulk_write(struct i2c_client *i2c, u8 reg, int count, u8 *buf)
 
 #if IS_ENABLED(CONFIG_SEC_ABC) && IS_ENABLED(CONFIG_ABC_IFPMIC_EVENT)
 	if (ret < 0)
-		sec_abc_send_event("MODULE=pdic@ERROR=i2c_fail");
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=pdic@INFO=i2c_fail");
+#else
+		sec_abc_send_event("MODULE=pdic@WARN=i2c_fail");
+#endif
 #endif
 
 	return ret;
@@ -371,7 +404,11 @@ int max77705_write_word(struct i2c_client *i2c, u8 reg, u16 value)
 #endif
 
 #if IS_ENABLED(CONFIG_SEC_ABC) && IS_ENABLED(CONFIG_ABC_IFPMIC_EVENT)
-		sec_abc_send_event("MODULE=pdic@ERROR=i2c_fail");
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=pdic@INFO=i2c_fail");
+#else
+		sec_abc_send_event("MODULE=pdic@WARN=i2c_fail");
+#endif
 #endif
 
 		return ret;
@@ -426,7 +463,11 @@ err:
 	mutex_unlock(&max77705->i2c_lock);
 #if IS_ENABLED(CONFIG_SEC_ABC) && IS_ENABLED(CONFIG_ABC_IFPMIC_EVENT)
 	if (ret < 0)
-		sec_abc_send_event("MODULE=pdic@ERROR=i2c_fail");
+#if IS_ENABLED(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=pdic@INFO=i2c_fail");
+#else
+		sec_abc_send_event("MODULE=pdic@WARN=i2c_fail");
+#endif
 #endif
 	return ret;
 }
@@ -729,6 +770,7 @@ static int max77705_fuelgauge_read_vcell(struct max77705_dev *max77705)
 
 static void max77705_wc_control(struct max77705_dev *max77705, bool enable)
 {
+#if IS_ENABLED(CONFIG_BATTERY_SAMSUNG)
 	union power_supply_propval value = {0, };
 	char wpc_en_status[2];
 	int ret = 0;
@@ -755,6 +797,7 @@ static void max77705_wc_control(struct max77705_dev *max77705, bool enable)
 	}
 
 	pr_info("%s: wpc_en(%d)\n", __func__, gpio_get_value(max77705->pdata->wpc_en));
+#endif
 }
 
 int max77705_usbc_fw_update(struct max77705_dev *max77705,
@@ -787,10 +830,12 @@ int max77705_usbc_fw_update(struct max77705_dev *max77705,
 	fw_header = (max77705_fw_header *)fw_bin;
 	pr_info("FW: magic/%x/ major/%x/ minor/%x/ product_id/%x/ rev/%x/ id/%x/",
 		  fw_header->magic, fw_header->major, fw_header->minor, fw_header->product_id, fw_header->rev, fw_header->id);
+
 	if(max77705->device_product_id != fw_header->product_id) {
 		pr_info("product indicator mismatch");
 		return 0;
 	}
+
 	if(fw_header->magic == MAX77705_SIGN)
 		pr_info("FW: matched");
 
@@ -1071,11 +1116,13 @@ EXPORT_SYMBOL_GPL(max77705_usbc_fw_update);
 
 void max77705_usbc_fw_setting(struct max77705_dev *max77705, int enforce_do)
 {
+#if defined(CONFIG_MAX77705_USE_EXTRA_FW)
 	if (max77705->pdata->extra_fw_enable) {
 		max77705_usbc_fw_update(max77705, BOOT_FLASH_FW_EXTRA, ARRAY_SIZE(BOOT_FLASH_FW_EXTRA), enforce_do);
 		pr_info("%s: extra fw update\n", __func__);
 		return;
 	}
+#endif
 
 	switch (max77705->pmic_rev) {
 	case MAX77705_PASS1:

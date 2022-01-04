@@ -23,7 +23,7 @@
 #include "../../common/sec_direct_charger.h"
 #endif
 #include "sm5451_charger.h"
-#if defined(CONFIG_SEC_ABC)
+#if IS_ENABLED(CONFIG_SEC_ABC)
 #include <linux/sti/abc_common.h>
 #endif
 
@@ -37,9 +37,6 @@ static int sm5451_read_reg(struct sm5451_charger *sm5451, u8 reg, u8 *dest)
 		ret = i2c_smbus_read_byte_data(sm5451->i2c, reg);
 		if (ret < 0) {
 			dev_err(sm5451->dev, "%s: fail to i2c_read(ret=%d)\n", __func__, ret);
-#if defined(CONFIG_SEC_ABC) && !defined(CONFIG_SEC_FACTORY)
-			sec_abc_send_event("MODULE=battery@ERROR=dc_i2c_fail");
-#endif
 		} else {
 			break;
 		}
@@ -48,6 +45,9 @@ static int sm5451_read_reg(struct sm5451_charger *sm5451, u8 reg, u8 *dest)
 	}
 
 	if (ret < 0) {
+#if IS_ENABLED(CONFIG_SEC_ABC) && !defined(CONFIG_SEC_FACTORY)
+		sec_abc_send_event("MODULE=battery@WARN=dc_i2c_fail");
+#endif
 		return ret;
 	} else {
 		*dest = (ret & 0xff);
@@ -64,15 +64,17 @@ int sm5451_bulk_read(struct sm5451_charger *sm5451, u8 reg, int count, u8 *buf)
 		ret = i2c_smbus_read_i2c_block_data(sm5451->i2c, reg, count, buf);
 		if (ret < 0) {
 			dev_err(sm5451->dev, "%s: fail to i2c_bulk_read(ret=%d)\n", __func__, ret);
-#if defined(CONFIG_SEC_ABC) && !defined(CONFIG_SEC_FACTORY)
-			sec_abc_send_event("MODULE=battery@ERROR=dc_i2c_fail");
-#endif
 		} else {
 			break;
 		}
 		if (cnt == 0)
 			msleep(30);
 	}
+
+#if IS_ENABLED(CONFIG_SEC_ABC) && !defined(CONFIG_SEC_FACTORY)
+	if (ret < 0)
+		sec_abc_send_event("MODULE=battery@WARN=dc_i2c_fail");
+#endif
 
 	return ret;
 }
@@ -85,15 +87,17 @@ static int sm5451_write_reg(struct sm5451_charger *sm5451, u8 reg, u8 value)
 		ret = i2c_smbus_write_byte_data(sm5451->i2c, reg, value);
 		if (ret < 0) {
 			dev_err(sm5451->dev, "%s: fail to i2c_write(ret=%d)\n", __func__, ret);
-#if defined(CONFIG_SEC_ABC) && !defined(CONFIG_SEC_FACTORY)
-			sec_abc_send_event("MODULE=battery@ERROR=dc_i2c_fail");
-#endif
 		} else {
 			break;
 		}
 		if (cnt == 0)
 			msleep(30);
 	}
+
+#if IS_ENABLED(CONFIG_SEC_ABC) && !defined(CONFIG_SEC_FACTORY)
+	if (ret < 0)
+		sec_abc_send_event("MODULE=battery@WARN=dc_i2c_fail");
+#endif
 
 	return ret;
 }

@@ -17,7 +17,7 @@
 #include <linux/device.h>
 #include <drm/drm_edid.h>
 #include <linux/string.h>
-#ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
+#if defined(CONFIG_SEC_DISPLAYPORT_BIGDATA)
 #include <linux/displayport_bigdata.h>
 #endif
 
@@ -275,7 +275,7 @@ static ssize_t dex_store(struct class *class,
 		goto exit;
 	}
 
-#ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
+#if defined(CONFIG_SEC_DISPLAYPORT_BIGDATA)
 	if (run)
 		secdp_bigdata_save_item(BD_DP_MODE, "DEX");
 	else
@@ -359,7 +359,7 @@ exit:
 
 static CLASS_ATTR_RO(monitor_info);
 
-#ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
+#if defined(CONFIG_SEC_DISPLAYPORT_BIGDATA)
 static ssize_t dp_error_info_show(struct class *class,
 		struct class_attribute *attr, char *buf)
 {
@@ -673,7 +673,7 @@ error:
 static CLASS_ATTR_RW(dp_edid);
 #endif
 
-#ifdef CONFIG_SEC_DISPLAYPORT_ENG
+#if defined(CONFIG_SEC_DISPLAYPORT_ENG)
 static ssize_t dp_forced_resolution_show(struct class *class,
 				struct class_attribute *attr, char *buf)
 {
@@ -864,10 +864,17 @@ static ssize_t dp_vx_lvl_store(struct class *dev,
 		struct class_attribute *attr, const char *buf, size_t size)
 {
 	char tmp[SZ_64] = {0,};
+	int len = min(sizeof(tmp), size);
 
-	memcpy(tmp, buf, min(ARRAY_SIZE(tmp), size));
+	if (!len || len >= SZ_64) {
+		DP_ERR("wrong length! %d\n", len);
+		goto end;
+	}
+
+	memcpy(tmp, buf, len);
+	tmp[SZ_64 - 1] = '\0';
 	secdp_parse_vxpx_store(DP_HW_LEGACY, DP_PARAM_VX, tmp);
-
+end:
 	return size;
 }
 
@@ -889,10 +896,17 @@ static ssize_t dp_px_lvl_store(struct class *dev,
 		struct class_attribute *attr, const char *buf, size_t size)
 {
 	char tmp[SZ_64] = {0,};
+	int len = min(sizeof(tmp), size);
 
-	memcpy(tmp, buf, min(ARRAY_SIZE(tmp), size));
+	if (!len || len >= SZ_64) {
+		DP_ERR("wrong length! %d\n", len);
+		goto end;
+	}
+
+	memcpy(tmp, buf, len);
+	tmp[SZ_64 - 1] = '\0';
 	secdp_parse_vxpx_store(DP_HW_LEGACY, DP_PARAM_PX, tmp);
-
+end:
 	return size;
 }
 
@@ -914,10 +928,17 @@ static ssize_t dp_vx_lvl_hbr2_hbr3_store(struct class *dev,
 		struct class_attribute *attr, const char *buf, size_t size)
 {
 	char tmp[SZ_64] = {0,};
+	int len = min(sizeof(tmp), size);
 
-	memcpy(tmp, buf, min(ARRAY_SIZE(tmp), size));
+	if (!len || len >= SZ_64) {
+		DP_ERR("wrong length! %d\n", len);
+		goto end;
+	}
+
+	memcpy(tmp, buf, len);
+	tmp[SZ_64 - 1] = '\0';
 	secdp_parse_vxpx_store(DP_HW_V123_HBR2_HBR3, DP_PARAM_VX, tmp);
-
+end:
 	return size;
 
 }
@@ -940,10 +961,17 @@ static ssize_t dp_px_lvl_hbr2_hbr3_store(struct class *dev,
 		struct class_attribute *attr, const char *buf, size_t size)
 {
 	char tmp[SZ_64] = {0,};
+	int len = min(sizeof(tmp), size);
 
-	memcpy(tmp, buf, min(ARRAY_SIZE(tmp), size));
+	if (!len || len >= SZ_64) {
+		DP_ERR("wrong length! %d\n", len);
+		goto end;
+	}
+
+	memcpy(tmp, buf, len);
+	tmp[SZ_64 - 1] = '\0';
 	secdp_parse_vxpx_store(DP_HW_V123_HBR2_HBR3, DP_PARAM_PX, tmp);
-
+end:
 	return size;
 }
 
@@ -965,10 +993,17 @@ static ssize_t dp_vx_lvl_hbr_rbr_store(struct class *dev,
 		struct class_attribute *attr, const char *buf, size_t size)
 {
 	char tmp[SZ_64] = {0,};
+	int len = min(sizeof(tmp), size);
 
-	memcpy(tmp, buf, min(ARRAY_SIZE(tmp), size));
+	if (!len || len >= SZ_64) {
+		DP_ERR("wrong length! %d\n", len);
+		goto end;
+	}
+
+	memcpy(tmp, buf, len);
+	tmp[SZ_64 - 1] = '\0';
 	secdp_parse_vxpx_store(DP_HW_V123_HBR_RBR, DP_PARAM_VX, tmp);
-
+end:
 	return size;
 }
 
@@ -990,10 +1025,17 @@ static ssize_t dp_px_lvl_hbr_rbr_store(struct class *dev,
 		struct class_attribute *attr, const char *buf, size_t size)
 {
 	char tmp[SZ_64] = {0,};
+	int len = min(sizeof(tmp), size);
 
-	memcpy(tmp, buf, min(ARRAY_SIZE(tmp), size));
+	if (!len || len >= SZ_64) {
+		DP_ERR("wrong length! %d\n", len);
+		goto end;
+	}
+
+	memcpy(tmp, buf, len);
+	tmp[SZ_64 - 1] = '\0';
 	secdp_parse_vxpx_store(DP_HW_V123_HBR_RBR, DP_PARAM_PX, tmp);
-
+end:
 	return size;
 }
 
@@ -1080,7 +1122,7 @@ enum {
 	DEX = 0,
 	DEX_VER,
 	MONITOR_INFO,
-#ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
+#if defined(CONFIG_SEC_DISPLAYPORT_BIGDATA)
 	DP_ERROR_INFO,
 #endif
 #ifdef CONFIG_SEC_FACTORY
@@ -1090,7 +1132,7 @@ enum {
 	DP_SELF_TEST,
 	DP_EDID,
 #endif
-#ifdef CONFIG_SEC_DISPLAYPORT_ENG
+#if defined(CONFIG_SEC_DISPLAYPORT_ENG)
 	DP_FORCED_RES,
 	DP_UNIT_TEST,
 	DP_AUX_CFG,
@@ -1110,7 +1152,7 @@ static struct attribute *secdp_class_attrs[] = {
 	[DEX]		= &class_attr_dex.attr,
 	[DEX_VER]	= &class_attr_dex_ver.attr,
 	[MONITOR_INFO]	= &class_attr_monitor_info.attr,
-#ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
+#if defined(CONFIG_SEC_DISPLAYPORT_BIGDATA)
 	[DP_ERROR_INFO] = &class_attr_dp_error_info.attr,
 #endif
 #ifdef CONFIG_SEC_FACTORY
@@ -1120,7 +1162,7 @@ static struct attribute *secdp_class_attrs[] = {
 	[DP_SELF_TEST]	= &class_attr_dp_self_test.attr,
 	[DP_EDID]	= &class_attr_dp_edid.attr,
 #endif
-#ifdef CONFIG_SEC_DISPLAYPORT_ENG
+#if defined(CONFIG_SEC_DISPLAYPORT_ENG)
 	[DP_FORCED_RES]	= &class_attr_dp_forced_resolution.attr,
 	[DP_UNIT_TEST]	= &class_attr_dp_unit_test.attr,
 	[DP_AUX_CFG]	= &class_attr_dp_aux_cfg.attr,
@@ -1168,7 +1210,7 @@ struct secdp_sysfs *secdp_sysfs_init(void)
 
 	sysfs->dp_class = dp_class;
 
-#ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
+#if defined(CONFIG_SEC_DISPLAYPORT_BIGDATA)
 	secdp_bigdata_init(dp_class);
 #endif
 

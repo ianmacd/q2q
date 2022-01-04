@@ -6,9 +6,9 @@
 #include "dp_link.h"
 #include "dp_panel.h"
 #include "dp_debug.h"
-#ifdef CONFIG_SEC_DISPLAYPORT
+#if defined(CONFIG_SEC_DISPLAYPORT)
 #include "secdp.h"
-#ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
+#if defined(CONFIG_SEC_DISPLAYPORT_BIGDATA)
 #include <linux/displayport_bigdata.h>
 #endif
 #endif
@@ -888,7 +888,7 @@ static void dp_link_parse_sink_status_field(struct dp_link_private *link)
 		link->link_status);
 	if (len < DP_LINK_STATUS_SIZE)
 		DP_ERR("DP link status read failed\n");
-#ifdef CONFIG_SEC_DISPLAYPORT
+#if defined(CONFIG_SEC_DISPLAYPORT)
 	else {
 		int i;
 
@@ -1267,7 +1267,7 @@ static void dp_link_reset_data(struct dp_link_private *link)
 	link->dp_link.test_response = 0;
 }
 
-#ifdef CONFIG_SEC_DISPLAYPORT
+#if defined(CONFIG_SEC_DISPLAYPORT)
 void secdp_clear_link_status_cnt(struct dp_link *dp_link)
 {
 	dp_link->poor_connection = false;
@@ -1355,7 +1355,7 @@ bool secdp_check_link_stable(struct dp_link *dp_link)
 exit:
 	DP_DEBUG("connection is <%s>\n", stable ? "stable" : "unstable");
 
-#ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
+#if defined(CONFIG_SEC_DISPLAYPORT_BIGDATA)
 	if (!stable)
 		secdp_bigdata_inc_error_cnt(ERR_INF_IRQHPD);
 #endif
@@ -1387,7 +1387,7 @@ static int dp_link_process_request(struct dp_link *dp_link)
 
 	dp_link_parse_sink_status_field(link);
 
-#ifdef CONFIG_SEC_DISPLAYPORT
+#if defined(CONFIG_SEC_DISPLAYPORT)
 	if (secdp_get_power_status() && !secdp_check_link_stable(dp_link)) {
 		dp_link->status_update_cnt++;
 		DP_INFO("status_update_cnt %d\n", dp_link->status_update_cnt);

@@ -1750,7 +1750,7 @@ static void __ref cdev_print(struct work_struct *work)
 	mutex_lock(&thermal_list_lock);
 	list_for_each_entry(cdev, &thermal_cdev_list, node) {
 		if (cdev->ops->get_cur_state)
-			cdev->ops->get_cur_state(cdev, &cur_state);
+			cdev->ops->get_cur_state(cdev, &cur_state);;
 
 		if (cur_state) {
 			ret = snprintf(buffer + added, sizeof(buffer) - added,
@@ -1763,7 +1763,7 @@ static void __ref cdev_print(struct work_struct *work)
 	}
 	mutex_unlock(&thermal_list_lock);
 
-	pr_info("thermal: cdev%s\n", buffer);
+	printk("thermal: cdev%s\n", buffer);
 
 	schedule_delayed_work(&cdev_print_work, HZ * 5);
 }

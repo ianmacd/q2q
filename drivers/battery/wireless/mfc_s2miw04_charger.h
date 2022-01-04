@@ -601,6 +601,8 @@
 #define MFC_FW_RESULT_PASS				1
 #define MFC_FW_RESULT_FAIL				0
 
+#define REQ_AFC_DLY	200
+
 #define MFC_FW_MSG		"@MFC_FW "
 
 /* F/W Update & Verification ERROR CODES */
@@ -704,34 +706,6 @@ enum {
 	MFC_ADC_PING_FRQ,
 	MFC_ADC_TX_IOUT,
 	MFC_ADC_TX_VOUT,
-};
-
-enum {
-	MFC_END_SIG_STRENGTH = 0,
-	MFC_END_POWER_TRANSFER,			/* 1 */
-	MFC_END_CTR_ERROR,				/* 2 */
-	MFC_END_RECEIVED_POWER,			/* 3 */
-	MFC_END_CHARGE_STATUS,			/* 4 */
-	MFC_POWER_CTR_HOLD_OFF,			/* 5 */
-	MFC_AFC_CONF_5V,				/* 6 */
-	MFC_AFC_CONF_10V,				/* 7 */
-	MFC_AFC_CONF_5V_TX,				/* 8 */
-	MFC_AFC_CONF_10V_TX,			/* 9 */
-	MFC_AFC_CONF_12V_TX,			/* 10 */
-	MFC_AFC_CONF_12_5V_TX,			/* 11 */
-	MFC_AFC_CONF_20V_TX,			/* 12 */
-	MFC_CONFIGURATION,				/* 13 */
-	MFC_IDENTIFICATION,				/* 14 */
-	MFC_EXTENDED_IDENT,				/* 15 */
-	MFC_LED_CONTROL_ON,				/* 16 */
-	MFC_LED_CONTROL_OFF,			/* 17 */
-	MFC_FAN_CONTROL_ON,				/* 18 */
-	MFC_FAN_CONTROL_OFF,			/* 19 */
-	MFC_REQUEST_AFC_TX,				/* 20 */
-	MFC_REQUEST_TX_ID,				/* 21 */
-	MFC_DISABLE_TX,					/* 22 */
-	MFC_PHM_ON,				/* 23 */
-	MFC_LED_CONTROL_DIMMING,			/* 24 */
 };
 
 enum {
@@ -992,6 +966,8 @@ struct mfc_charger_data {
 
 	bool req_tx_id;
 	bool is_abnormal_pad;
+
+	int req_afc_delay;
 
 	bool sleep_mode;
 	wait_queue_head_t suspend_wait;

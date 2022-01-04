@@ -203,6 +203,8 @@ const struct file_operations ops_name = {				\
 #define KEY_WAKEUP_UNLOCK	253	/* Wake-up to recent view, ex: AOP */
 #define KEY_RECENT		254
 
+#define KEY_WATCH		550	/* Premium watch: 2finger double tap */
+
 #define BTN_PALM		0x118	/* palm flag */
 #define BTN_LARGE_PALM		0x119	/* large palm flag */
 
@@ -220,7 +222,11 @@ const struct file_operations ops_name = {				\
 
 #define ABS_MT_CUSTOM		0x3e	/* custom event */
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
+#define SW_PEN_INSERT		0x0f  /* set = pen insert, remove */
+#else
 #define SW_PEN_INSERT		0x13  /* set = pen insert, remove */
+#endif
 
 enum grip_write_mode {
 	G_NONE				= 0,
@@ -333,6 +339,7 @@ typedef enum {
 #define SEC_TS_MODE_SPONGE_SINGLE_TAP		(1 << 3)
 #define SEC_TS_MODE_SPONGE_PRESS		(1 << 4)
 #define SEC_TS_MODE_SPONGE_DOUBLETAP_TO_WAKEUP	(1 << 5)
+#define SEC_TS_MODE_SPONGE_TWO_FINGER_DOUBLETAP	(1 << 7)
 
 /*SPONGE library parameters*/
 #define SEC_TS_MAX_SPONGE_DUMP_BUFFER	512
@@ -385,6 +392,7 @@ enum sec_ts_cover_id {
 	SEC_TS_LED_BACK_COVER,
 	SEC_TS_CLEAR_SIDE_VIEW_COVER,
 	SEC_TS_MINI_SVIEW_WALLET_COVER,
+	SEC_TS_CLEAR_CAMERA_VIEW_COVER,
 
 	SEC_TS_MONTBLANC_COVER = 100,
 	SEC_TS_NFC_SMART_COVER = 255,
@@ -440,6 +448,10 @@ enum sec_input_notify_t {
 	NOTIFIER_LCD_VRR_LFD_OFF_REQUEST,	/* to LCD: set LFD OFF */
 	NOTIFIER_LCD_VRR_LFD_OFF_RELEASE,	/* to LCD: unset LFD OFF */
 	NOTIFIER_TSP_ESD_INTERRUPT,
+	NOTIFIER_WACOM_SAVING_MODE_ON,		/* to tsp: multi spen enable cmd on */
+	NOTIFIER_WACOM_SAVING_MODE_OFF,		/* to tsp: multi spen enable cmd off */
+	NOTIFIER_WACOM_KEYBOARDCOVER_FLIP_OPEN,
+	NOTIFIER_WACOM_KEYBOARDCOVER_FLIP_CLOSE,
 	NOTIFIER_VALUE_MAX,
 };
 
@@ -578,6 +590,7 @@ struct sec_ts_plat_data {
 	int y_node_num;
 
 	unsigned irq_gpio;
+	unsigned int irq_flag;
 	int gpio_spi_cs;
 	int i2c_burstmax;
 	int bringup;
@@ -668,6 +681,7 @@ struct sec_ts_plat_data {
 	bool support_fod_lp_mode;
 	bool enable_settings_aot;
 	bool sync_reportrate_120;
+	bool support_refresh_rate_mode;
 	bool support_vrr;
 	bool support_open_short_test;
 	bool support_mis_calibration_test;
@@ -678,9 +692,14 @@ struct sec_ts_plat_data {
 	int support_dual_foldable;
 	int support_sensor_hall;
 	int support_rawdata_map_num;
+	int dump_ic_ver;
 	bool disable_vsync_scan;
 	bool unuse_dvdd_power;
 	bool chip_on_board;
+	bool enable_sysinput_enabled;
+	bool not_support_lcd_doze;
+	bool not_support_io_ldo;
+	bool sense_off_when_cover_closed;
 
 	struct completion resume_done;
 	struct wakeup_source *sec_ws;
@@ -743,3 +762,5 @@ void sec_input_register_notify(struct notifier_block *nb, notifier_fn_t notifier
 void sec_input_unregister_notify(struct notifier_block *nb);
 int sec_input_notify(struct notifier_block *nb, unsigned long noti, void *v);
 int sec_input_self_request_notify(struct notifier_block *nb);
+int sec_input_enable_device(struct input_dev *dev);
+int sec_input_disable_device(struct input_dev *dev);

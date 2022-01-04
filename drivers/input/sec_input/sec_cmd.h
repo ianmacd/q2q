@@ -38,7 +38,7 @@
 #define SEC_CMD_BUF_SIZE		(4096 - 1)
 #define SEC_CMD_STR_LEN			256
 #define SEC_CMD_RESULT_STR_LEN		(4096 - 1)
-#define SEC_CMD_RESULT_STR_LEN_EXPAND	(SEC_CMD_RESULT_STR_LEN * 4)
+#define SEC_CMD_RESULT_STR_LEN_EXPAND	(SEC_CMD_RESULT_STR_LEN * 6)
 #define SEC_CMD_PARAM_NUM		8
 
 #if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
@@ -119,9 +119,8 @@ extern int sec_cmd_init(struct sec_cmd_data *data, struct sec_cmd *cmds, int len
 extern void sec_cmd_exit(struct sec_cmd_data *data, int devt);
 extern void sec_cmd_send_event_to_user(struct sec_cmd_data *data, char *test, char *result);
 
-void sec_cmd_virtual_tsp_register(struct sec_cmd_data *sec);
-
 #if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
+void sec_cmd_virtual_tsp_register(struct sec_cmd_data *sec);
 int sec_cmd_virtual_tsp_read_sysfs(struct sec_cmd_data *sec, const char *path, char *buf, int len);
 int sec_cmd_virtual_tsp_write_sysfs(struct sec_cmd_data *sec, const char *path, const char *cmd);
 int sec_cmd_virtual_tsp_write_cmd(struct sec_cmd_data *sec, bool main, bool sub);

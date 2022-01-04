@@ -1454,8 +1454,13 @@ static ssize_t max77705_sysfs_set_prop(struct _pdic_data_t *ppdic_data,
 		memcpy(str, buf, size);
 		p	= str;
 		tok = strsep(&p, ",");
-		len = strlen(tok);
-		msg_maxim("tok: %s, len: %d", tok, len);
+		if (tok) {
+			len = strlen(tok);
+			msg_maxim("tok: %s, len: %d", tok, len);
+		} else {
+			len = 0;
+			msg_maxim("tok: len: 0");
+		}
 
 		if (!strncmp(TAG_HMD, tok, len)) {
 			/* called by HmtManager to inform list of supported HMD devices
@@ -1476,8 +1481,11 @@ static ssize_t max77705_sysfs_set_prop(struct _pdic_data_t *ppdic_data,
 			int num_hmd = 0, sz = 0;
 
 			tok = strsep(&p, ",");
-			sz	= strlen(tok);
-			kstrtouint(tok, 10, &num_hmd);
+			if (tok) {
+				sz = strlen(tok);
+				kstrtouint(tok, 10, &num_hmd);
+			}
+
 			msg_maxim("HMD num: %d, sz:%d", num_hmd, sz);
 
 			max77705_store_hmd_dev(usbpd_data, str + (len + sz + 2), size - (len + sz + 2),
@@ -3892,7 +3900,7 @@ static void max77705_usbc_shutdown(struct platform_device *pdev)
 		platform_get_drvdata(pdev);
 	struct device_node *np;
 	int gpio_dp_sw_oe;
-	u8 uic_int = 0;
+	u8 status = 0, uic_int = 0, vbus = 0;
 	u8 uid = 0;
 
 	msg_maxim("max77705 usbc driver shutdown++++");
@@ -3911,13 +3919,24 @@ static void max77705_usbc_shutdown(struct platform_device *pdev)
 
 	max77705_usbc_disable_irq(usbc_data);
 
-	max77705_read_reg(usbc_data->muic, REG_USBC_STATUS1, &uid);
-	uid = (uid & BIT_UIDADC) >> FFS(BIT_UIDADC);
+	max77705_read_reg(usbc_data->muic, REG_USBC_STATUS1, &status);
+	uid = (status & BIT_UIDADC) >> FFS(BIT_UIDADC);
+	vbus = (status & BIT_VBADC) >> FFS(BIT_VBADC);
 
 	/* send the reset command */
-	if (usbc_data->current_connstat == WATER)
+	if (usbc_data->current_connstat == WATER) {
+#if defined(CONFIG_UPGRADED_WATER_DETECT)
+		msg_maxim("WATER STATE, %s, %s", vbus ? "VBUS" : "NO VBUS",
+					usbc_data->muic_data->is_hiccup_mode ? "HICCUP MODE" : "NOT HICCUP MODE");
+		if (!vbus && !usbc_data->muic_data->is_hiccup_mode) {
+			msg_maxim("call reset function");
+			max77705_reset_ic(usbc_data);
+		} else
+			msg_maxim("don't call the reset function");
+#else
 		msg_maxim("no call the reset function(WATER STATE)");
-	else if (usbc_data->cur_rid != RID_OPEN && usbc_data->cur_rid != RID_UNDEFINED)
+#endif
+	} else if (usbc_data->cur_rid != RID_OPEN && usbc_data->cur_rid != RID_UNDEFINED)
 		msg_maxim("no call the reset function(RID)");
 	else if (uid != UID_Open)
 		msg_maxim("no call the reset function(UID)");

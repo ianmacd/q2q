@@ -676,6 +676,10 @@ unsigned long vmalloc_to_pfn(const void *addr);
  * On nommu, vmalloc/vfree wrap through kmalloc/kfree directly, so there
  * is no special casing required.
  */
+
+#ifdef CONFIG_ENABLE_VMALLOC_SAVING
+extern bool is_vmalloc_addr(const void *x);
+#else
 static inline bool is_vmalloc_addr(const void *x)
 {
 #ifdef CONFIG_MMU
@@ -686,6 +690,7 @@ static inline bool is_vmalloc_addr(const void *x)
 	return false;
 #endif
 }
+#endif //CONFIG_ENABLE_VMALLOC_SAVING
 
 #ifndef is_ioremap_addr
 #define is_ioremap_addr(x) is_vmalloc_addr(x)
@@ -2337,7 +2342,7 @@ static inline void zero_resv_unavail(void) {}
 
 extern void set_dma_reserve(unsigned long new_dma_reserve);
 extern void memmap_init_zone(unsigned long, int, unsigned long, unsigned long,
-		enum memmap_context, struct vmem_altmap *);
+		enum meminit_context, struct vmem_altmap *);
 extern void setup_per_zone_wmarks(void);
 extern void update_kswapd_threads(void);
 extern int __meminit init_per_zone_wmark_min(void);
@@ -2740,6 +2745,15 @@ static inline vm_fault_t vmf_insert_page(struct vm_area_struct *vma,
 
 	return VM_FAULT_NOPAGE;
 }
+
+#ifndef io_remap_pfn_range
+static inline int io_remap_pfn_range(struct vm_area_struct *vma,
+				     unsigned long addr, unsigned long pfn,
+				     unsigned long size, pgprot_t prot)
+{
+	return remap_pfn_range(vma, addr, pfn, size, pgprot_decrypted(prot));
+}
+#endif
 
 static inline vm_fault_t vmf_error(int err)
 {

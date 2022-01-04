@@ -198,7 +198,7 @@ struct ion_buffer *ion_buffer_alloc(struct ion_device *dev, size_t len,
 	task_cputime(current, &utime, &stime_e);
 	stime_d = stime_e - stime_s;
 	if (stime_d / NSEC_PER_MSEC > 100) {
-		pr_info("%s ion_heap_id: %d mask=0x%x timeJS(ms):%u/%llu len:0x%zx",
+		pr_info("%s ion_heap_id: %d mask=0x%x timeJS(ms):%u/%llu len:%zu\n",
 			__func__, heap->id, heap_id_mask,
 			jiffies_to_msecs(jiffies - jiffies_s),
 			stime_d / NSEC_PER_MSEC, len);

@@ -553,7 +553,7 @@ out:
 	}
 
 	if (rc) {
-		if (ctfm)
+		if (ctfm && !IS_ERR(ctfm))
 			crypto_free_skcipher(ctfm);
 
 		return ERR_PTR(rc);

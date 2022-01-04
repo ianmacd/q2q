@@ -1437,6 +1437,7 @@ int max77705_pd_init(struct max77705_usbc_platform_data *usbc_data)
 	pd_data->pd_noti.sink_status.has_apdo = false;
 	pd_data->pd_noti.sink_status.fp_sec_pd_select_pdo = max77705_select_pdo;
 	pd_data->pd_noti.sink_status.fp_sec_pd_select_pps = max77705_select_pps;
+	pd_data->pd_noti.sink_status.fp_sec_pd_manual_ccopen_req = pdic_manual_ccopen_request;
 
 	/* skip below codes for detecting incomplete connection cable. */
 	/* pd_data->pd_noti.event = PDIC_NOTIFY_EVENT_DETACH; */

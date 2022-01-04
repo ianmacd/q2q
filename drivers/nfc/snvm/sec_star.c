@@ -70,6 +70,8 @@
 #define STAR_RESET_PROTOCOL		_IO(STAR_MAGIC_CODE, 2)
 #define STAR_RESET_INTERFACE	_IO(STAR_MAGIC_CODE, 3)
 
+#define APDU_CHAIN_MAX_SIZE		((65536/256) + 1)
+
 static int32_t star_transceive(void *ctx, uint8_t *cmd, uint32_t cmd_size, uint8_t **rsp, uint32_t *rsp_size)
 {
 	ese_data_t cmd_data = {0, NULL};
@@ -101,7 +103,7 @@ static int32_t star_transceive(void *ctx, uint8_t *cmd, uint32_t cmd_size, uint8
 	p_cmd += APDU_CHAIN_NUM_SIZE;
 	cmd_size -= APDU_CHAIN_NUM_SIZE;
 
-	if (chain_num == 0) {
+	if (chain_num == 0 || chain_num > APDU_CHAIN_MAX_SIZE) {
 		return -1;
 	}
 

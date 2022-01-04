@@ -14,9 +14,6 @@
 #if IS_ENABLED(CONFIG_MUIC_NOTIFIER)
 extern int muic_set_hiccup_mode(int on_off);
 #endif
-#if defined(CONFIG_MUIC_MAX77705)
-extern void pdic_manual_ccopen_request(int is_on);
-#endif
 
 char *sec_bat_thermal_zone[] = {
 	"COLD",
@@ -751,10 +748,8 @@ void sec_bat_thermal_check(struct sec_battery_info *battery)
 #if IS_ENABLED(CONFIG_MUIC_NOTIFIER)
 				muic_set_hiccup_mode(1);
 #endif
-#if defined(CONFIG_MUIC_MAX77705)
 				if (is_pd_wire_type(battery->cable_type))
-					pdic_manual_ccopen_request(1);
-#endif
+					sec_pd_manual_ccopen_req(1);
 			}
 			break;
 		case BAT_THERMAL_OVERHEAT:

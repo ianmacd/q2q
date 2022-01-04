@@ -280,7 +280,7 @@ void xhci_ring_cmd_db(struct xhci_hcd *xhci)
 		return;
 
 	xhci_dbg(xhci, "// Ding dong!\n");
-	
+
 	trace_xhci_ring_host_doorbell(0, DB_VALUE_HOST);
 
 	writel(DB_VALUE_HOST, &xhci->dba->doorbell[0]);

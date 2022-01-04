@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/list.h>
@@ -39,6 +39,8 @@
 #define MAX_TE_SOURCE_ID  2
 
 #define SEC_PANEL_NAME_MAX_LEN  256
+
+u8 dbgfs_tx_cmd_buf[SZ_4K];
 
 #if defined(CONFIG_DISPLAY_SAMSUNG)
 char dsi_display_primary[MAX_CMDLINE_PARAM_LEN];
@@ -237,7 +239,7 @@ int dsi_display_set_backlight(struct drm_connector *connector,
 	if (vdd->br_info.flash_gamma_support &&
 			!vdd->br_info.flash_gamma_init_done) {
 		vdd->br_info.common_br.bl_level = bl_lvl;
-		LCD_INFO(vdd, "flash_gamme not ready, save level(%d) \n", bl_lvl);
+		LCD_ERR(vdd, "flash_gamme not ready, save level(%d) \n", bl_lvl);
 		return rc;
 	}
 
@@ -640,9 +642,6 @@ static bool dsi_display_validate_reg_read(struct dsi_panel *panel)
 	for (i = 0; i < count; i++)
 		len += lenp[i];
 
-	for (i = 0; i < len; i++)
-		j += len;
-
 	for (j = 0; j < config->groups; ++j) {
 		for (i = 0; i < len; ++i) {
 			if (config->return_buf[i] !=
@@ -845,6 +844,9 @@ static int dsi_display_status_check_te(struct dsi_display *display,
 	int rc = 1, i = 0;
 	int const esd_te_timeout = msecs_to_jiffies(3*20);
 
+	if (!rechecks)
+		return rc;
+
 	dsi_display_change_te_irq_status(display, true);
 
 	for (i = 0; i < rechecks; i++) {
@@ -903,7 +905,8 @@ int dsi_display_check_status(struct drm_connector *connector, void *display,
 	if (te_check_override)
 		te_rechecks = MAX_TE_RECHECKS;
 
-	if (panel->panel_mode == DSI_OP_VIDEO_MODE)
+	if ((dsi_display->trusted_vm_env) ||
+			(panel->panel_mode == DSI_OP_VIDEO_MODE))
 		te_rechecks = 0;
 
 	ret = dsi_display_clk_ctrl(dsi_display->dsi_clk_handle,
@@ -1043,7 +1046,7 @@ static int dsi_display_cmd_rx(struct dsi_display *display,
 	flags |= (DSI_CTRL_CMD_FETCH_MEMORY | DSI_CTRL_CMD_READ);
 	if ((m_ctrl->ctrl->host_config.panel_mode == DSI_OP_VIDEO_MODE) ||
 			((cmd->msg.flags & MIPI_DSI_MSG_CMD_DMA_SCHED) &&
-			 (display->panel->panel_initialized)))
+			 (display->enabled)))
 		flags |= DSI_CTRL_CMD_CUSTOM_DMA_SCHED;
 
 	rc = dsi_ctrl_cmd_transfer(m_ctrl->ctrl, &cmd->msg, &flags);
@@ -1067,10 +1070,9 @@ int dsi_display_cmd_transfer(struct drm_connector *connector,
 		u32 cmd_buf_len)
 {
 	struct dsi_display *dsi_display = display;
-	struct dsi_cmd_desc cmd;
-	u8 cmd_payload[MAX_CMD_PAYLOAD_SIZE];
-	int rc = 0;
-	bool state = false;
+	int rc = 0, cnt = 0, i = 0;
+	bool state = false, transfer = false;
+	struct dsi_panel_cmd_set *set;
 
 	if (!dsi_display || !cmd_buf) {
 		DSI_ERR("[DSI] invalid params\n");
@@ -1079,12 +1081,8 @@ int dsi_display_cmd_transfer(struct drm_connector *connector,
 
 	DSI_DEBUG("[DSI] Display command transfer\n");
 
-	rc = dsi_display_cmd_prepare(cmd_buf, cmd_buf_len,
-			&cmd, cmd_payload, MAX_CMD_PAYLOAD_SIZE);
-	if (rc) {
-		DSI_ERR("[DSI] command prepare failed. rc %d\n", rc);
-		return rc;
-	}
+	if ((cmd_buf[1]) || (cmd_buf[3] & MIPI_DSI_MSG_LASTCOMMAND))
+		transfer = true;
 
 	mutex_lock(&dsi_display->display_lock);
 	rc = dsi_display_ctrl_get_host_init_state(dsi_display, &state);
@@ -1106,8 +1104,59 @@ int dsi_display_cmd_transfer(struct drm_connector *connector,
 		goto end;
 	}
 
-	rc = dsi_display->host.ops->transfer(&dsi_display->host,
-			&cmd.msg);
+	/*
+	 * Reset the dbgfs buffer if the commands sent exceed the available
+	 * buffer size. For video mode, limiting the buffer size to 2K to
+	 * ensure no performance issues.
+	 */
+	if (dsi_display->panel->panel_mode == DSI_OP_CMD_MODE) {
+		if ((dsi_display->tx_cmd_buf_ndx + cmd_buf_len) > SZ_4K) {
+			memset(dbgfs_tx_cmd_buf, 0, SZ_4K);
+			dsi_display->tx_cmd_buf_ndx = 0;
+		}
+	} else {
+		if ((dsi_display->tx_cmd_buf_ndx + cmd_buf_len) > SZ_2K) {
+			memset(dbgfs_tx_cmd_buf, 0, SZ_4K);
+			dsi_display->tx_cmd_buf_ndx = 0;
+		}
+	}
+
+	memcpy(&dbgfs_tx_cmd_buf[dsi_display->tx_cmd_buf_ndx], cmd_buf,
+			cmd_buf_len);
+	dsi_display->tx_cmd_buf_ndx += cmd_buf_len;
+	if (transfer) {
+		struct dsi_cmd_desc *cmds;
+
+		set = &dsi_display->cmd_set;
+		set->count = 0;
+		dsi_panel_get_cmd_pkt_count(dbgfs_tx_cmd_buf,
+				dsi_display->tx_cmd_buf_ndx, &cnt);
+		dsi_panel_alloc_cmd_packets(set, cnt);
+		dsi_panel_create_cmd_packets(dbgfs_tx_cmd_buf,
+				dsi_display->tx_cmd_buf_ndx, cnt, set->cmds);
+		cmds = set->cmds;
+		dsi_display->tx_cmd_buf_ndx = 0;
+
+		for (i = 0; i < cnt; i++) {
+			if (cmds->last_command)
+				cmds->msg.flags |= MIPI_DSI_MSG_LASTCOMMAND;
+			rc = dsi_display->host.ops->transfer(&dsi_display->host,
+					&cmds->msg);
+			if (rc < 0) {
+				DSI_ERR("failed to send command, rc=%d\n", rc);
+				break;
+			}
+			if (cmds->post_wait_ms)
+				usleep_range(cmds->post_wait_ms*1000,
+						((cmds->post_wait_ms*1000)+10));
+			cmds++;
+		}
+
+		memset(dbgfs_tx_cmd_buf, 0, SZ_4K);
+		dsi_panel_destroy_cmd_packets(set);
+		dsi_panel_dealloc_cmd_packets(set);
+	}
+
 end:
 	mutex_unlock(&dsi_display->display_lock);
 	return rc;
@@ -1288,7 +1337,8 @@ int dsi_display_set_power(struct drm_connector *connector,
 
 #if defined(CONFIG_DISPLAY_SAMSUNG)
 	LCD_INFO(vdd, "%s %s --\n", power_mode == SDE_MODE_DPMS_LP1 ? "LP1" :
-			power_mode == SDE_MODE_DPMS_LP2 ? "LP2" : "NO_LP", rc ? "failed" : "successful");
+			power_mode == SDE_MODE_DPMS_LP2 ? "LP2" : "NO_LP",
+			rc ? "failed" : "successful");
 #endif
 
 	return rc;
@@ -1405,6 +1455,14 @@ static ssize_t debugfs_misr_setup(struct file *file,
 	display->misr_frame_count = frame_count;
 
 	mutex_lock(&display->display_lock);
+
+	if (!display->hw_ownership) {
+		DSI_DEBUG("[%s] op not supported due to HW unavailability\n",
+				display->name);
+		rc = -EOPNOTSUPP;
+		goto unlock;
+	}
+
 	rc = dsi_display_clk_ctrl(display->dsi_clk_handle,
 			DSI_CORE_CLK, DSI_CLK_ON);
 	if (rc) {
@@ -1456,6 +1514,14 @@ static ssize_t debugfs_misr_read(struct file *file,
 		return -ENOMEM;
 
 	mutex_lock(&display->display_lock);
+
+	if (!display->hw_ownership) {
+		DSI_DEBUG("[%s] op not supported due to HW unavailability\n",
+				display->name);
+		rc = -EOPNOTSUPP;
+		goto error;
+	}
+
 	rc = dsi_display_clk_ctrl(display->dsi_clk_handle,
 			DSI_CORE_CLK, DSI_CLK_ON);
 	if (rc) {
@@ -1553,9 +1619,19 @@ static ssize_t debugfs_esd_trigger_check(struct file *file,
 
 	display->esd_trigger = esd_trigger;
 
+	mutex_lock(&display->display_lock);
+
+	if (!display->hw_ownership) {
+		DSI_DEBUG("[%s] op not supported due to HW unavailability\n",
+				display->name);
+		rc = -EOPNOTSUPP;
+		goto unlock;
+	}
+
 	if (display->esd_trigger) {
 		DSI_INFO("ESD attack triggered by user\n");
-		rc = dsi_panel_trigger_esd_attack(display->panel);
+		rc = dsi_panel_trigger_esd_attack(display->panel,
+						display->trusted_vm_env);
 		if (rc) {
 			DSI_ERR("Failed to trigger ESD attack\n");
 			goto error;
@@ -1563,6 +1639,8 @@ static ssize_t debugfs_esd_trigger_check(struct file *file,
 	}
 
 	rc = len;
+unlock:
+	mutex_unlock(&display->display_lock);
 error:
 	kfree(buf);
 	return rc;
@@ -3147,8 +3225,12 @@ static int dsi_display_broadcast_cmd(struct dsi_display *display,
 		m_flags |= DSI_CTRL_CMD_LAST_COMMAND;
 	}
 
-	if ((msg->flags & MIPI_DSI_MSG_CMD_DMA_SCHED) &&
-				(display->panel->panel_initialized)) {
+	/*
+	 * During broadcast command dma scheduling is always recommended.
+	 * As long as the display is enabled and TE is running the
+	 * DSI_CTRL_CMD_CUSTOM_DMA_SCHED flag should be set.
+	 */
+	if (display->enabled) {
 		flags |= DSI_CTRL_CMD_CUSTOM_DMA_SCHED;
 		m_flags |= DSI_CTRL_CMD_CUSTOM_DMA_SCHED;
 	}
@@ -3327,7 +3409,7 @@ static ssize_t dsi_host_transfer(struct mipi_dsi_host *host,
 			cmd_flags |= DSI_CTRL_CMD_ASYNC_WAIT;
 
 		if ((msg->flags & MIPI_DSI_MSG_CMD_DMA_SCHED) &&
-				(display->panel->panel_initialized))
+				(display->enabled))
 			cmd_flags |= DSI_CTRL_CMD_CUSTOM_DMA_SCHED;
 
 #if defined(CONFIG_DISPLAY_SAMSUNG)
@@ -4288,10 +4370,13 @@ static int dsi_display_res_init(struct dsi_display *display)
 	 * In trusted vm, the connectors will not be enabled
 	 * until the HW resources are assigned and accepted.
 	 */
-	if (display->trusted_vm_env)
+	if (display->trusted_vm_env) {
 		display->is_active = false;
-	else
+		display->hw_ownership = false;
+	} else {
 		display->is_active = true;
+		display->hw_ownership = true;
+	}
 
 	return 0;
 error_ctrl_put:
@@ -4724,7 +4809,6 @@ static int _dsi_display_dyn_update_clks(struct dsi_display *display,
 		dsi_phy_dynamic_refresh_clear(ctrl->phy);
 	}
 
-defer_dfps_wait:
 	rc = dsi_clk_update_parent(enable_clk,
 			&display->clock_info.mux_clks);
 	if (rc)
@@ -4756,7 +4840,20 @@ recover_byte_clk:
 exit:
 	dsi_clk_disable_unprepare(&display->clock_info.src_clks);
 
+defer_dfps_wait:
 	return rc;
+}
+
+void dsi_display_dfps_update_parent(struct dsi_display *display)
+{
+	int rc = 0;
+
+	rc = dsi_clk_update_parent(&display->clock_info.src_clks,
+			      &display->clock_info.mux_clks);
+	if (rc)
+		DSI_ERR("could not switch back to src clks %d\n", rc);
+
+	dsi_clk_disable_unprepare(&display->clock_info.src_clks);
 }
 
 static int dsi_display_dynamic_clk_switch_vid(struct dsi_display *display,
@@ -5618,18 +5715,32 @@ end:
 
 static int dsi_display_pre_release(void *data)
 {
+	struct dsi_display *display;
+
 	if (!data)
 		return -EINVAL;
 
-	dsi_display_ctrl_irq_update((struct dsi_display *)data, false);
+	display = (struct dsi_display *)data;
+	mutex_lock(&display->display_lock);
+	display->hw_ownership = false;
+	mutex_unlock(&display->display_lock);
+
+	dsi_display_ctrl_irq_update(display, false);
 
 	return 0;
 }
 
 static int dsi_display_pre_acquire(void *data)
 {
+	struct dsi_display *display;
+
 	if (!data)
 		return -EINVAL;
+
+	display = (struct dsi_display *)data;
+	mutex_lock(&display->display_lock);
+	display->hw_ownership = true;
+	mutex_unlock(&display->display_lock);
 
 	dsi_display_ctrl_irq_update((struct dsi_display *)data, true);
 
@@ -5858,6 +5969,8 @@ error_ctrl_deinit:
 		display_ctrl = &display->ctrl[i];
 		(void)dsi_phy_drv_deinit(display_ctrl->phy);
 		(void)dsi_ctrl_drv_deinit(display_ctrl->ctrl);
+		dsi_ctrl_put(display_ctrl->ctrl);
+		dsi_phy_put(display_ctrl->phy);
 	}
 	(void)dsi_display_debugfs_deinit(display);
 error:
@@ -7937,6 +8050,7 @@ int dsi_display_prepare(struct dsi_display *display)
 	SDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);
 	mutex_lock(&display->display_lock);
 
+	display->hw_ownership = true;
 	mode = display->panel->cur_mode;
 
 	dsi_display_set_ctrl_esd_check_flag(display, false);
@@ -8505,7 +8619,7 @@ int dsi_display_enable(struct dsi_display *display)
 	}
 
 #if defined(CONFIG_DISPLAY_SAMSUNG)
-	LCD_INFO(vdd, "++\n");
+	LCD_INFO(vdd, "++ : ndx=%d\n", vdd->ndx);
 #endif
 
 	mutex_lock(&display->display_lock);
@@ -8586,7 +8700,7 @@ error:
 	mutex_unlock(&display->display_lock);
 	SDE_EVT32(SDE_EVTLOG_FUNC_EXIT);
 #if defined(CONFIG_DISPLAY_SAMSUNG)
-	LCD_INFO(vdd, "-- \n");
+	LCD_INFO(vdd, "-- : ndx=%d\n", vdd->ndx);
 #endif
 	return rc;
 }
@@ -8597,7 +8711,7 @@ int dsi_display_post_enable(struct dsi_display *display)
 #if defined(CONFIG_DISPLAY_SAMSUNG)
 	struct samsung_display_driver_data *vdd = display->panel->panel_private;
 
-	LCD_INFO(vdd, "++ \n");
+	LCD_INFO(vdd, "++ : ndx=%d\n", vdd->ndx);
 #endif
 
 	if (!display) {
@@ -8639,7 +8753,7 @@ int dsi_display_post_enable(struct dsi_display *display)
 	mutex_unlock(&display->display_lock);
 
 #if defined(CONFIG_DISPLAY_SAMSUNG)
-	LCD_INFO(vdd, "-- \n");
+	LCD_INFO(vdd, "-- : ndx=%d\n", vdd->ndx);
 #endif
 	return rc;
 }
@@ -8762,7 +8876,7 @@ int dsi_display_disable(struct dsi_display *display)
 	}
 
 #if defined(CONFIG_DISPLAY_SAMSUNG)
-	LCD_INFO(vdd, "++ \n");
+	LCD_INFO(vdd, "++ : ndx=%d\n", vdd->ndx);
 #endif
 
 	SDE_EVT32(SDE_EVTLOG_FUNC_ENTRY);
@@ -8820,7 +8934,7 @@ int dsi_display_disable(struct dsi_display *display)
 	mutex_unlock(&display->display_lock);
 	SDE_EVT32(SDE_EVTLOG_FUNC_EXIT);
 #if defined(CONFIG_DISPLAY_SAMSUNG)
-	LCD_INFO(vdd, "-- \n");
+	LCD_INFO(vdd, "-- : ndx=%d\n", vdd->ndx);
 #endif
 	return rc;
 }
@@ -8968,6 +9082,7 @@ int dsi_display_unprepare(struct dsi_display *display)
 			DSI_ERR("[%s] panel post-unprepare failed, rc=%d\n",
 			       display->name, rc);
 	}
+	display->hw_ownership = false;
 
 	mutex_unlock(&display->display_lock);
 

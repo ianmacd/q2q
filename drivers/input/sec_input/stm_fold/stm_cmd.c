@@ -4250,6 +4250,9 @@ static void run_factory_miscalibration(void *device_data)
 	memset(data, 0x00, sizeof(data));
 	memset(buff, 0x00, sizeof(buff));
 
+	stm_ts_set_scanmode(ts, STM_TS_SCAN_MODE_SCAN_OFF);
+	sec_delay(100);
+
 	data[0] = 0xC7;
 	data[1] = 0x02;
 	ret = ts->stm_ts_i2c_write(ts, data, 2, NULL, 0);
@@ -5148,6 +5151,76 @@ error:
 	enable_irq(ts->irq);
 }
 
+static void run_hf_sensor_diff_test(void *device_data)
+{
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
+	struct stm_ts_data *ts = container_of(sec, struct stm_ts_data, sec);
+	char buff[SEC_CMD_STR_LEN];
+	u8 reg;
+	u8 data[STM_TS_EVENT_BUFF_SIZE];
+	int rc, retry = 0;
+
+	sec_cmd_set_default_result(sec);
+
+	ts->stm_ts_systemreset(ts, 0);
+
+	mutex_lock(&ts->fn_mutex);
+	disable_irq(ts->irq);
+
+	reg = STM_TS_CMD_RUN_HF_SENSOR_DIFF_TEST;
+	rc = ts->stm_ts_i2c_write(ts, &reg, 1, NULL, 0);
+	if (rc < 0) {
+		input_err(true, &ts->client->dev, "%s: failed to write cmd\n", __func__);
+		goto error;
+	}
+
+	sec_delay(300);
+
+	memset(data, 0x0, STM_TS_EVENT_BUFF_SIZE);
+	rc = -EIO;
+	reg = STM_TS_READ_ONE_EVENT;
+	while (ts->stm_ts_i2c_read(ts, &reg, 1, data, STM_TS_EVENT_BUFF_SIZE) > 0) {
+		input_info(true, &ts->client->dev,
+				"%s: event %02X, %02X, %02X, %02X, %02X, %02X, %02X, %02X\n",
+				__func__, data[0], data[1], data[2], data[3],
+				data[4], data[5], data[6], data[7]);
+
+		if (data[0] == STM_TS_EVENT_PASS_REPORT) {
+			rc = 0; /* PASS */
+			break;
+		} else if (data[0] == STM_TS_EVENT_ERROR_REPORT) {
+			rc = 1; /* FAIL */
+			break;
+		}
+
+		if (retry++ > STM_TS_RETRY_COUNT * 25) {
+			input_err(true, &ts->client->dev,
+					"%s: Time Over (%02X,%02X,%02X,%02X,%02X,%02X,%02X,%02X)\n",
+					__func__, data[0], data[1], data[2], data[3],
+					data[4], data[5], data[6], data[7]);
+			break;
+		}
+		sec_delay(20);
+	}
+
+error:
+	mutex_unlock(&ts->fn_mutex);
+
+	if (rc == 0) {
+		snprintf(buff, sizeof(buff), "0");
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+	} else {
+		snprintf(buff, sizeof(buff), "1");
+		sec->cmd_state = SEC_CMD_STATUS_FAIL;
+	}
+	if (sec->cmd_all_factory_state == SEC_CMD_STATUS_RUNNING)
+		sec_cmd_set_cmd_result_all(sec, buff, strnlen(buff, sizeof(buff)), "HF_SENSOR_DIFF");
+	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+
+	stm_ts_reinit(ts);
+	enable_irq(ts->irq);
+}
+
 static void run_force_calibration(void *device_data)
 {
 	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
@@ -5314,6 +5387,7 @@ static void factory_cmd_result_all(void *device_data)
 	run_factory_miscalibration(sec);
 	run_sram_test(sec);
 	run_polarity_test(sec);
+	run_hf_sensor_diff_test(sec);
 
 	sec->cmd_all_factory_state = SEC_CMD_STATUS_OK;
 
@@ -5707,6 +5781,31 @@ static void singletap_enable(void *device_data)
 		ts->plat_data->lowpower_mode |= SEC_TS_MODE_SPONGE_SINGLE_TAP;
 	else
 		ts->plat_data->lowpower_mode &= ~SEC_TS_MODE_SPONGE_SINGLE_TAP;
+
+	input_info(true, &ts->client->dev, "%s: %s, %02X\n",
+			__func__, sec->cmd_param[0] ? "on" : "off", ts->plat_data->lowpower_mode);
+
+	stm_ts_set_custom_library(ts);
+
+	snprintf(buff, sizeof(buff), "OK");
+	sec->cmd_state = SEC_CMD_STATUS_OK;
+	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+	sec_cmd_set_cmd_exit(sec);
+	input_info(true, &ts->client->dev, "%s: %d\n", __func__, sec->cmd_param[0]);
+}
+
+static void two_finger_doubletap_enable(void *device_data)
+{
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)device_data;
+	struct stm_ts_data *ts = container_of(sec, struct stm_ts_data, sec);
+	char buff[SEC_CMD_STR_LEN] = { 0 };
+
+	sec_cmd_set_default_result(sec);
+
+	if (sec->cmd_param[0])
+		ts->plat_data->lowpower_mode |= SEC_TS_MODE_SPONGE_TWO_FINGER_DOUBLETAP;
+	else
+		ts->plat_data->lowpower_mode &= ~SEC_TS_MODE_SPONGE_TWO_FINGER_DOUBLETAP;
 
 	input_info(true, &ts->client->dev, "%s: %s, %02X\n",
 			__func__, sec->cmd_param[0] ? "on" : "off", ts->plat_data->lowpower_mode);
@@ -6137,9 +6236,10 @@ static void fix_active_mode(void *device_data)
 		if (ts->plat_data->power_state == SEC_INPUT_STATE_POWER_ON)
 			stm_ts_fix_active_mode(ts, !!sec->cmd_param[0]);
 		ts->fix_active_mode = !!sec->cmd_param[0];
+		snprintf(buff, sizeof(buff), "OK");
+		sec->cmd_state = SEC_CMD_STATUS_OK;
 	}
 
-	snprintf(buff, sizeof(buff), "OK");
 	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
 	sec->cmd_state = SEC_CMD_STATUS_WAITING;
 	sec_cmd_set_cmd_exit(sec);
@@ -6171,8 +6271,10 @@ static void touch_aging_mode(void *device_data)
 		} else {
 			stm_ts_reinit(ts);
 		}
+		snprintf(buff, sizeof(buff), "OK");
+		sec->cmd_state = SEC_CMD_STATUS_OK;
 	}
-	snprintf(buff, sizeof(buff), "OK");
+
 	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
 	sec->cmd_state = SEC_CMD_STATUS_WAITING;
 	sec_cmd_set_cmd_exit(sec);
@@ -6198,8 +6300,10 @@ static void ear_detect_enable(void *device_data)
 		if (ret < 0) {
 			snprintf(buff, sizeof(buff), "NG");
 			sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		} else {
+			snprintf(buff, sizeof(buff), "OK");
+			sec->cmd_state = SEC_CMD_STATUS_OK;
 		}
-		snprintf(buff, sizeof(buff), "OK");
 	}
 
 	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
@@ -6228,8 +6332,10 @@ static void pocket_mode_enable(void *device_data)
 		if (ret < 0) {
 			snprintf(buff, sizeof(buff), "NG");
 			sec->cmd_state = SEC_CMD_STATUS_FAIL;
+		} else {
+			snprintf(buff, sizeof(buff), "OK");
+			sec->cmd_state = SEC_CMD_STATUS_OK;
 		}
-		snprintf(buff, sizeof(buff), "OK");
 	}
 
 	sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
@@ -6428,6 +6534,7 @@ struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("run_snr_touched", run_snr_touched),},
 	{SEC_CMD("run_sram_test", run_sram_test),},
 	{SEC_CMD("run_polarity_test", run_polarity_test),},
+	{SEC_CMD("run_hf_sensor_diff_test", run_hf_sensor_diff_test),},
 	{SEC_CMD("run_force_calibration", run_force_calibration),},
 	{SEC_CMD("set_factory_level", set_factory_level),},
 	{SEC_CMD("factory_cmd_result_all", factory_cmd_result_all),},
@@ -6441,6 +6548,7 @@ struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("drawing_test_enable", drawing_test_enable),},
 	{SEC_CMD_H("spay_enable", spay_enable),},
 	{SEC_CMD_H("singletap_enable", singletap_enable),},
+	{SEC_CMD_H("two_finger_doubletap_enable", two_finger_doubletap_enable),},
 	{SEC_CMD_H("aot_enable", aot_enable),},
 	{SEC_CMD_H("aod_enable", aod_enable),},
 	{SEC_CMD("set_aod_rect", set_aod_rect),},

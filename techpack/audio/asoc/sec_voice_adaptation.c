@@ -207,6 +207,30 @@ static int sec_voice_aec_effect_put(struct snd_kcontrol *kcontrol,
 	return sec_voice_aec_effect(enable);
 }
 
+static const char * const voice_isolate[] = {
+	"Standard", "VoiceFocus", "AllSound"
+};
+
+static const struct soc_enum sec_voice_isolation_enum[] = {
+	SOC_ENUM_SINGLE_EXT(3, voice_isolate),
+};
+
+static int sec_voice_isolation_get(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	return 0;
+}
+
+static int sec_voice_isolation_put(struct snd_kcontrol *kcontrol,
+			struct snd_ctl_elem_value *ucontrol)
+{
+	int mode = ucontrol->value.integer.value[0];
+
+	pr_debug("%s: mode = %d\n", __func__, mode);
+
+	return sec_voice_isolation_mode(mode);
+}
+
 static const struct snd_kcontrol_new samsung_voice_solution_mixer_controls[] = {
 	SOC_SINGLE_MULTI_EXT("Sec Set DHA data", SND_SOC_NOPM, 0, 65535, 0, 14,
 		sec_voice_adaptation_sound_get,
@@ -235,6 +259,9 @@ static const struct snd_kcontrol_new samsung_voice_solution_mixer_controls[] = {
 	SOC_ENUM_EXT("DSP AEC Effect", sec_aec_effect_enum[0],
 		sec_voice_aec_effect_get,
 		sec_voice_aec_effect_put),
+	SOC_ENUM_EXT("Voice Isolation Mode", sec_voice_isolation_enum[0],
+		sec_voice_isolation_get,
+		sec_voice_isolation_put),
 };
 
 void sec_voice_adaptation_add_controls(struct snd_soc_component *component)

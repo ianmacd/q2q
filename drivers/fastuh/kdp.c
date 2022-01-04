@@ -605,6 +605,7 @@ static int kdp_check_path_mismatch(struct kdp_vfsmount *vfsmnt)
 		"/com.android.art",
 		"/com.android.adbd",
 		"/com.android.sdkext",
+		"/com.samsung.hardware.hyper",
 	};
 
 	if (!vfsmnt->bp_mount) {

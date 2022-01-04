@@ -784,15 +784,16 @@ void sec_bat_txpower_calc(struct sec_battery_info *battery)
 		}
 
 		psy_do_property(battery->pdata->wireless_charger_name, get,
-		POWER_SUPPLY_EXT_PROP_WIRELESS_TX_UNO_VIN, value);
+			POWER_SUPPLY_EXT_PROP_WIRELESS_TX_UNO_VIN, value);
 		tx_vout = value.intval;
 
 		psy_do_property(battery->pdata->wireless_charger_name, get,
-		POWER_SUPPLY_EXT_PROP_WIRELESS_TX_UNO_IIN, value);
+			POWER_SUPPLY_EXT_PROP_WIRELESS_TX_UNO_IIN, value);
 		tx_iout = value.intval;
 
+		value.intval = SEC_BATTERY_VOLTAGE_MV;
 		psy_do_property(battery->pdata->fuelgauge_name, get,
-		POWER_SUPPLY_PROP_VOLTAGE_NOW, value);
+			POWER_SUPPLY_PROP_VOLTAGE_NOW, value);
 		vbatt = value.intval;
 
 		battery->tx_time_cnt++;

@@ -437,6 +437,9 @@ static void sec_abc_work_func(struct work_struct *work)
 	char temp[ABC_BUFFER_MAX], timestamp[ABC_BUFFER_MAX], temp2[ABC_BUFFER_MAX];
 	char uevent_level_str[ABC_BUFFER_MAX] = {0,};
 	char *event_level, *event_type;
+#if IS_ENABLED(CONFIG_SEC_ABC_MOTTO)
+	char temp3[ABC_BUFFER_MAX], *event_module, *tempp;
+#endif
 	int idx = 0;
 	int i = 0;
 	u64 ktime;
@@ -477,7 +480,14 @@ static void sec_abc_work_func(struct work_struct *work)
 
 	ABC_PRINT("event_level : %s, event type : %s\n", event_level, event_type);
 #if IS_ENABLED(CONFIG_SEC_ABC_MOTTO)
-	motto_send_device_info(event_type);
+	strcpy(temp3,uevent_str[0]);
+	event_module = &temp3[0];
+	tempp = strsep(&event_module, "=");
+
+	if (event_module != NULL) {
+		ABC_PRINT("event_module : %s\n", event_module);
+		motto_send_device_info(event_module, event_type);
+	}
 #endif
 
 	sec_abc_get_uevent_level_str(uevent_level_str, event_level, event_type);

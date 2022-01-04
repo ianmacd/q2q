@@ -250,10 +250,10 @@ static int __mhi_download_rddm_in_panic(struct mhi_controller *mhi_cntrl)
 			to_mhi_pm_state_str(mhi_cntrl->pm_state),
 			TO_MHI_STATE_STR(mhi_cntrl->dev_state),
 			TO_MHI_EXEC_STR(mhi_cntrl->ee));
-			
+
 	if (mhi_cntrl->ee == MHI_EE_PBL) {
 		MHI_CNTRL_LOG("Aborting RDDM dumps as device is in %s state\n",
-		TO_MHI_EXEC_STR(mhi_cntrl->ee));
+				 TO_MHI_EXEC_STR(mhi_cntrl->ee));
 		return -EACCES;
 	}
 

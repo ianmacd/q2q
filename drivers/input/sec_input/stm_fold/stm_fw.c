@@ -875,7 +875,7 @@ err_request_fw:
 
 int stm_ts_fw_update_on_hidden_menu(struct stm_ts_data *ts, int update_type)
 {
-	int retval = 0;
+	int retval = SEC_ERROR;
 
 	/* Factory cmd for firmware update
 	 * argument represent what is source of firmware like below.

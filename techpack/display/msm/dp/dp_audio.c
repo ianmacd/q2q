@@ -8,9 +8,9 @@
 
 #include <drm/drm_dp_helper.h>
 
-#ifdef CONFIG_SEC_DISPLAYPORT
+#if defined(CONFIG_SEC_DISPLAYPORT)
 #include "secdp.h"
-#ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
+#if defined(CONFIG_SEC_DISPLAYPORT_BIGDATA)
 #include <linux/displayport_bigdata.h>
 #endif
 #endif
@@ -409,7 +409,7 @@ static int dp_audio_info_setup(struct platform_device *pdev,
 		return 0;
 	}
 
-#ifdef CONFIG_SEC_DISPLAYPORT_BIGDATA
+#if defined(CONFIG_SEC_DISPLAYPORT_BIGDATA)
 	secdp_bigdata_save_item(BD_AUD_CH, params->num_of_channels);
 	secdp_bigdata_save_item(BD_AUD_FREQ, params->sample_rate_hz);
 #endif
@@ -752,7 +752,7 @@ static int dp_audio_on(struct dp_audio *dp_audio)
 		return -EINVAL;
 	}
 
-#ifdef CONFIG_SEC_DISPLAYPORT
+#if defined(CONFIG_SEC_DISPLAYPORT)
 	if (!secdp_get_cable_status()) {
 		DP_INFO("cable is out\n");
 		return -EINVAL;
@@ -809,7 +809,7 @@ static int dp_audio_off(struct dp_audio *dp_audio)
 
 	ext = &audio->ext_audio_data;
 
-#ifdef CONFIG_SEC_DISPLAYPORT
+#if defined(CONFIG_SEC_DISPLAYPORT)
 	if (!atomic_read(&audio->session_on)) {
 		DP_INFO("dp audio already off\n");
 		return rc;

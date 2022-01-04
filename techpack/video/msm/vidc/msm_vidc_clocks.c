@@ -525,7 +525,10 @@ static int msm_dcvs_scale_clocks(struct msm_vidc_inst *inst,
 	} else if ((dcvs->dcvs_flags & MSM_VIDC_DCVS_DECR &&
 		    bufs_with_fw >= dcvs->nom_threshold) ||
 		   (dcvs->dcvs_flags & MSM_VIDC_DCVS_INCR &&
-		    bufs_with_fw <= dcvs->nom_threshold))
+		    bufs_with_fw <= dcvs->nom_threshold) ||
+		   (inst->session_type == MSM_VIDC_ENCODER &&
+		    dcvs->dcvs_flags & MSM_VIDC_DCVS_DECR &&
+		    bufs_with_fw >= dcvs->min_threshold))
 		dcvs->dcvs_flags = 0;
 
 	s_vpr_p(inst->sid, "DCVS: bufs_with_fw %d Th[%d %d %d] Flag %#x\n",
@@ -725,6 +728,13 @@ static unsigned long msm_vidc_calc_freq_iris2(struct msm_vidc_inst *inst,
 		 */
 		if (fps == 480)
 			vpp_cycles += div_u64(vpp_cycles * 2, 100);
+
+		/*
+		 * Add 5 percent extra for 720p@960fps use case
+		 * to bump it to next level (366MHz).
+		 */
+		if (fps == 960)
+			vpp_cycles += div_u64(vpp_cycles * 5, 100);
 
 		/* VSP */
 		/* bitrate is based on fps, scale it using operating rate */
@@ -1272,6 +1282,7 @@ decision_done:
 
 	/* For WORK_MODE_1, set Low Latency mode by default to HW. */
 
+	latency.enable = false;
 	if (inst->session_type == MSM_VIDC_ENCODER &&
 			inst->clk_data.work_mode == HFI_WORKMODE_1) {
 		latency.enable = true;
@@ -1280,6 +1291,10 @@ decision_done:
 			HFI_PROPERTY_PARAM_VENC_LOW_LATENCY_MODE,
 			(void *)&latency, sizeof(latency));
 	}
+
+	s_vpr_h(inst->sid, "Configuring work mode = %u low latency = %u",
+			pdata.video_work_mode,
+			latency.enable);
 
 	rc = msm_comm_scale_clocks_and_bus(inst, 1);
 
@@ -1419,6 +1434,7 @@ static inline int msm_vidc_power_save_mode_enable(struct msm_vidc_inst *inst,
 	void *pdata = NULL;
 	struct hfi_device *hdev = NULL;
 	u32 hfi_perf_mode;
+	struct v4l2_ctrl *ctrl;
 
 	hdev = inst->core->device;
 	if (inst->session_type != MSM_VIDC_ENCODER) {
@@ -1428,6 +1444,9 @@ static inline int msm_vidc_power_save_mode_enable(struct msm_vidc_inst *inst,
 		return 0;
 	}
 
+	ctrl = get_ctrl(inst, V4L2_CID_MPEG_VIDC_VENC_COMPLEXITY);
+	if (!is_realtime_session(inst) && !ctrl->val)
+		enable = true;
 	prop_id = HFI_PROPERTY_CONFIG_VENC_PERF_MODE;
 	hfi_perf_mode = enable ? HFI_VENC_PERFMODE_POWER_SAVE :
 		HFI_VENC_PERFMODE_MAX_QUALITY;
